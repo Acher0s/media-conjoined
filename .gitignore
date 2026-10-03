@@ -1,0 +1,8 @@
+.env
+data/
+recordings/
+archive/
+secrets/
+__pycache__/
+*.pyc
+.pytest_cache/

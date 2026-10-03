@@ -1,0 +1,14 @@
+# Node 1 (where the HDDs are): only the stitcher, which turns each match manifest into one MP4 per
+# team. The archiver on node 2 copies recordings into ARCHIVE_DIR over SSH.
+#   docker compose -f docker-compose.node1.yml up -d --build
+services:
+  stitch:
+    build: ./control
+    image: media-control:local
+    restart: unless-stopped
+    command: ["python", "-m", "mediactl.stitch"]
+    environment:
+      ARCHIVE_DIR: /archive
+      STITCH_WAIT_MINUTES: ${STITCH_WAIT_MINUTES:-10}
+    volumes:
+      - ${HOST_ARCHIVE_DIR:-./archive}:/archive

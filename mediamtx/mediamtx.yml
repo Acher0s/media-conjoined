@@ -1,0 +1,106 @@
+# MediaMTX for the tournament. Settings that differ per deployment come from the environment
+# (see docker-compose.yml): MTX_WEBRTCADDITIONALHOSTS, the SRT passphrases.
+logLevel: info
+logDestinations: [stdout]
+
+# Every publish/read attempt is checked by the control service (control/mediactl/auth.py),
+# so logins can be added or reset without reloading MediaMTX.
+authMethod: http
+authHTTPAddress: http://control:9001/mediamtx/auth
+authHTTPExclude:
+  # The API and metrics are only reachable inside the compose network
+  - action: api
+  - action: metrics
+
+api: yes
+apiAddress: :9997
+metrics: no
+pprof: no
+playback: no
+
+# RTSP: internal only, the delay players publish the delayed feeds over it
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+rtmp: no
+hls: no
+
+# WebRTC: browser publishing (players) and browser viewing (casters), behind the reverse proxy.
+# The proxy does TLS; media goes over UDP 8189 straight to this server.
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+webrtcLocalUDPAddress: :8189
+webrtcAdditionalHosts: []
+
+# SRT: OBS publishing (players) and OBS viewing (casters)
+srt: yes
+srtAddress: :8890
+
+pathDefaults:
+  record: no
+
+paths:
+  # Team paths: one POV per team, one publisher at a time (the control service refuses a second
+  # teammate; overridePublisher lets the same login reconnect after a drop). Recorded in short
+  # segments for the delayed feeds and the archive; the archiver deletes them, not MediaMTX.
+  '~^team(0[1-9]|1[0-6])$':
+    record: yes
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+    recordFormat: fmp4
+    recordPartDuration: 1s
+    recordSegmentDuration: 4s
+    recordDeleteAfter: 0s
+    overridePublisher: yes
+
+  # Delayed feeds, published by the delay players. Always available: casters stay connected and see
+  # the slate whenever there's nothing to show. (MediaMTX doesn't allow alwaysAvailable on a regex
+  # path, hence one entry per slot.)
+  s1t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s1t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s2t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s2t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s3t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s3t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s4t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s4t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s5t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s5t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s6t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s6t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s7t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s7t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s8t1-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
+  s8t2-delayed:
+    alwaysAvailable: yes
+    alwaysAvailableFile: /slate/slate.mp4
