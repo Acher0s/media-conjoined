@@ -48,13 +48,7 @@ async def stitch_team(manifest: dict, team: str, out_dir: Path) -> dict:
         return entry
     out = out_dir / f"{manifest['match_id']}_{team}.mp4"
     with tempfile.NamedTemporaryFile("w", suffix=".ffconcat", delete=False) as f:
-        f.write("ffconcat version 1.0\n")
-        for n, seg in enumerate(segs):
-            f.write(f"file '{seg.path}'\n")
-            if n == 0 and start > seg.start:
-                f.write(f"inpoint {start - seg.start:.3f}\n")
-            if n == len(segs) - 1 and end < seg.end:
-                f.write(f"outpoint {end - seg.start:.3f}\n")
+        f.write(recordings.concat_list(segs, start, end))
         listfile = f.name
     tmp = out.with_suffix(".part.mp4")
     proc = await asyncio.create_subprocess_exec(

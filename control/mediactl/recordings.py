@@ -86,3 +86,28 @@ def contiguous_from(segs: list[Segment], i: int, stop_at: float | None = None, c
 
 def overlapping(segs: list[Segment], start: float, end: float) -> list[Segment]:
     return [s for s in segs if s.end > start and s.start < end]
+
+
+def concat_list(segs: list[Segment], start: float | None = None, end: float | None = None) -> str:
+    """An ffconcat list that plays the segments back to back, from `start` to `end` (UNIX times).
+
+    Each file's timestamps count from its segment's start (the file name), and the tracks don't end
+    together: the video usually starts a little after the audio. Left to itself, ffmpeg's concat
+    demuxer moves on by each file's longest track, which puts a gap of up to ~0.4 s in the video at
+    every segment boundary. So every file but the last gets an explicit duration: the time to the
+    next segment's start, or its own length when a gap follows (gaps are skipped, not filled).
+    No inpoint on the later files: seeking to 0 would drop the audio before the first keyframe.
+    """
+    lines = ["ffconcat version 1.0"]
+    for n, seg in enumerate(segs):
+        lines.append(f"file '{seg.path}'")
+        inpoint = max(0.0, start - seg.start) if n == 0 and start is not None else 0.0
+        if inpoint > 0:
+            lines.append(f"inpoint {inpoint:.6f}")
+        if n + 1 < len(segs):
+            following = segs[n + 1]
+            step = following.start - seg.start if following.start - seg.end <= GAP_TOLERANCE else seg.duration
+            lines.append(f"duration {max(step - inpoint, 0.001):.6f}")
+        elif end is not None and end < seg.end:
+            lines.append(f"outpoint {end - seg.start:.6f}")
+    return "\n".join(lines) + "\n"

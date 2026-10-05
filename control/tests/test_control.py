@@ -174,3 +174,15 @@ def test_segments_and_gaps(tmp_path):
     run = recordings.contiguous_from(segs, 0, stop_at=base + 8)
     assert len(run) == 2  # stops before an assignment change
     assert len(recordings.overlapping(segs, base + 6, base + 22)) == 3
+
+
+def test_concat_list_places_segments_by_their_start(tmp_path):
+    base = 1_700_000_000.0
+    for a, b in [(0, 3.8), (3.8, 8), (8, 12), (20, 24)]:
+        _seg(tmp_path, base + a, base + b)
+    segs = recordings.segments(tmp_path)
+    lines = recordings.concat_list(segs, base + 1, base + 22).splitlines()
+    durations = [float(x.split()[1]) for x in lines if x.startswith("duration")]
+    # to the next start (minus the inpoint on the first), own length before the gap, none on the last
+    assert durations == pytest.approx([2.8, 4.2, 4.0])
+    assert [x for x in lines if x.startswith(("inpoint", "outpoint"))] == ["inpoint 1.000000", "outpoint 2.000000"]

@@ -120,11 +120,7 @@ class SlotPlayer:
         content_start = run[0].start + inpoint
         content_end = run[-1].end
         with tempfile.NamedTemporaryFile("w", suffix=".ffconcat", delete=False) as f:
-            f.write("ffconcat version 1.0\n")
-            for n, seg in enumerate(run):
-                f.write(f"file '{seg.path}'\n")
-                if n == 0 and inpoint > 0:
-                    f.write(f"inpoint {inpoint:.3f}\n")
+            f.write(recordings.concat_list(run, content_start))
             listfile = f.name
 
         url = f"{config.MEDIAMTX_RTSP}/{self.slot}{config.DELAYED_SUFFIX}"
