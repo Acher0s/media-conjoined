@@ -1,20 +1,29 @@
 """End-to-end test against a running stack (docker compose up) with DEFAULT_DELAY_MINUTES=0.5.
 
-  python tests/integration_test.py
-Uses docker to run fake publishers/readers on the compose network. Needs: aiohttp, docker.
+  set -a; . ./.env; set +a; python tests/integration_test.py
+Run from the repo root, with the stack's .env loaded (token, CONTROL_BIND, HOST_RECORDINGS_DIR,
+ARCHIVE_TARGET). Uses docker to run fake publishers/readers on the compose network. Needs: aiohttp, docker.
+It writes test logins, slots, a delay change and a match manifest: wipe the data and recordings afterwards.
 """
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 
 import aiohttp
 
-API = os.environ.get("CONTROL_URL", "http://127.0.0.1:9000")
+API = os.environ.get("CONTROL_URL", f"http://{os.environ.get('CONTROL_BIND') or '127.0.0.1'}:9000")
 TOKEN = os.environ.get("CONTROL_API_TOKEN", "test-token-123")
-NET = os.environ.get("COMPOSE_NETWORK", "media_default")
+# Compose names things after the project, which defaults to the repo folder's name
+PROJECT = os.environ.get("COMPOSE_PROJECT_NAME") or re.sub(
+    r"[^a-z0-9_-]", "", os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).lower())
+NET = os.environ.get("COMPOSE_NETWORK", f"{PROJECT}_default")
+MEDIAMTX_CONTAINER = os.environ.get("MEDIAMTX_CONTAINER", f"{PROJECT}-mediamtx-1")
+RECORDINGS = os.environ.get("HOST_RECORDINGS_DIR") or "recordings"
+ARCHIVING = bool(os.environ.get("ARCHIVE_TARGET"))
 IMAGE = "bluenviron/mediamtx:1.21.1-ffmpeg"
 H = {"Authorization": f"Bearer {TOKEN}"}
 ENV = {**os.environ, "MSYS_NO_PATHCONV": "1"}
@@ -40,7 +49,7 @@ def publisher(name, login, password, path="team05", size="640x360"):
 
 
 def mtx_path(path):
-    out = docker("exec", "media-mediamtx-1", "wget", "-qO-", f"http://localhost:9997/v3/paths/get/{path}").stdout
+    out = docker("exec", MEDIAMTX_CONTAINER, "wget", "-qO-", f"http://localhost:9997/v3/paths/get/{path}").stdout
     return json.loads(out) if out.strip() else {}
 
 
@@ -169,10 +178,10 @@ async def main():
         st, m = await call("POST", "/matches", {"match_id": "set1-m1", "set_id": 1, "match_no": 1, "stage": 1,
                                                 "round": 1, "teams": ["team05", "team06"],
                                                 "start": now - 60, "end": now})
-        check("match manifest saved", st == 200 and os.path.exists("recordings/_manifests/set1-m1.json"))
+        check("match manifest saved", st == 200 and os.path.exists(os.path.join(RECORDINGS, "_manifests", "set1-m1.json")))
         st, arc = await call("GET", "/archive")
         check("archive status (local disk + archiver)", st == 200 and arc["local"]["free_bytes"] > 0 and
-              arc.get("enabled") is False, arc)
+              arc.get("enabled") is ARCHIVING, arc)
 
     for name in ("pub-alice", "pub-bob", "pub-wrong"):
         docker("rm", "-f", name)
