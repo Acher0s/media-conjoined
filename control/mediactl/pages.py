@@ -93,9 +93,14 @@ def make_app(conn) -> web.Application:
         row = _player(conn, request)
         if row is None:
             return web.json_response({"error": "Wrong login or password."}, status=401)
+        # A team needs at least one tested player: whoever streams its games
+        team_tested = [{"login": r["login"], "name": r["name"], "tested_at": r["verified_at"]}
+                       for r in db.active_logins(conn)
+                       if r["team_path"] == row["team_path"] and r["kind"] == "player" and r["verified_at"]]
         return web.json_response({"login": row["login"], "name": row["name"], "team": row["team_path"],
                                   "team_name": db.team_names(conn).get(row["team_path"]),
                                   "tested": row["verified_at"] is not None, "tested_at": row["verified_at"],
+                                  "team_tested": team_tested,
                                   "twitch": _twitch_state(conn, row["team_path"]),
                                   "delay_minutes": db.get_delay(conn, config.DEFAULT_DELAY_MINUTES)[0]},
                                  headers={"Cache-Control": "no-store"})

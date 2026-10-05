@@ -100,22 +100,37 @@ function showLoggedIn(data) {
   showBanner(data);
 }
 
+function escapeHtml(text) {
+  const el = document.createElement("span");
+  el.textContent = text;
+  return el.innerHTML;
+}
+
 function showBanner(data) {
   const banner = $("banner");
   const button = (label) => `<button class="small" data-go-test>${label}</button>`;
+  const when = (t) => new Date(t * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"});
+  const others = data ? (data.team_tested || []).filter((p) => p.login !== data.login) : [];
   if (!data) {
     banner.className = "banner";
-    banner.innerHTML = "<p>Log in to see whether you've tested your setup. <b>Every player has to test once before " +
-                       "the event.</b></p>";
+    banner.innerHTML = "<p>Log in to see whether your team has tested. <b>Every team has to test once before the " +
+                       "event:</b> at least the player who will stream your games.</p>";
   } else if (data.tested) {
-    const when = new Date(data.tested_at * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"});
     banner.className = "banner tested";
     banner.innerHTML = `<h3>\u2705 Your setup is tested</h3><p>The tournament received a working stream from you ` +
-                       `(${when}). Changed something since? Test again any time.</p>${button("Test again \u2193")}`;
+                       `(${when(data.tested_at)}), so your team is covered. Changed something since? Test again any ` +
+                       `time.</p>${button("Test again \u2193")}`;
+  } else if (others.length) {
+    const names = others.map((p) => `<b>${escapeHtml(p.name)}</b> (${when(p.tested_at)})`).join(", ");
+    banner.className = "banner tested";
+    banner.innerHTML = `<h3>\u2705 Your team is covered</h3><p>${names} tested a stream for your team. That's ` +
+                       "enough if they stream your games. <b>Will you stream some games yourself too?</b> Then test " +
+                       `your own setup as well.</p>${button("Test my own setup \u2193")}`;
   } else {
     banner.className = "banner untested";
-    banner.innerHTML = "<h3>\u26a0\ufe0f You haven't tested your setup yet</h3>" +
-      "<p><b>Every player has to test once before the event.</b> It takes a few minutes:</p>" +
+    banner.innerHTML = "<h3>\u26a0\ufe0f Your team hasn't tested yet</h3>" +
+      "<p><b>Every team has to test once before the event:</b> the player who will stream your games (if you'll " +
+      "both stream, both test). It takes a few minutes:</p>" +
       "<ol><li>Go live, the way you chose below.</li><li>Watch your test feed and check that you see and hear your " +
       "game.</li><li>This banner turns green by itself.</li></ol>" + button("Go to the test \u2193");
   }

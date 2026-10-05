@@ -256,6 +256,12 @@ def test_go_live_endpoints_for_players(conn):
             assert (await client.get("/go/me", headers=bad)).status == 401
             me = await (await client.get("/go/me", headers=auth_header)).json()
             assert me["team"] == "team05" and me["team_name"] == "Falcon" and me["tested"] is False
+            assert me["team_tested"] == []
+            roster.sync(conn, [team("team05", "Falcon", ("1", "alice"), ("2", "bob"))], [])
+            db.mark_verified(conn, "team05-p2", 123.0)  # bob tested: the team is covered, alice isn't tested
+            me = await (await client.get("/go/me", headers=auth_header)).json()
+            assert me["tested"] is False and me["team_tested"] == [{"login": "team05-p2", "name": "bob",
+                                                                   "tested_at": 123.0}]
             assert me["twitch"]["channel"] is None
 
             r = await client.post("/go/twitch", headers=auth_header, json={"channel": "twitch.tv/FalconPlays"})

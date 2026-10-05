@@ -27,7 +27,8 @@ Three pieces, built in this order:
 - **A stream never holds up a match.** Games start on schedule; a missing POV is the producer's problem.
 - **Links are permanent.** One fixed path per team, one login per player, generated in one batch before
   the event. Starting a set creates nothing new, so nothing new can fail.
-- **Testing happens before the event.** Every player does one test stream; the server records who
+- **Testing happens before the event.** Every team does at least one test stream, by the player who will
+  stream its games (both, if they take turns); the server records who
   succeeded. The organiser decides the timing; the bot has no deadline.
 - **No player-facing commands.** Players never use the bot for streaming.
 - **The delay (default 30 min) is the safety margin.** A late or dropped stream shows as a slate on the
@@ -195,7 +196,7 @@ nothing else in the bot is affected; the event listeners run separately from the
    restart MediaMTX. Panels and overview must follow; delayed feeds must recover.
 4. Scrim night with real teams 1–2 weeks before: browser publishing, player swaps between matches, a
    caster using only the feed links and `!stream lineup`.
-5. Every player's mandatory test stream, followed via `!stream overview`.
+5. Every team's mandatory test stream (whoever will stream its games), followed via `!stream overview`.
 
 ## Open questions (implemented with these defaults)
 
