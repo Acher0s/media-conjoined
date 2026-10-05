@@ -42,6 +42,8 @@ services:
     ports:
       # Bot API: only the bot may reach this (firewall + bearer token)
       - "${CONTROL_BIND:-127.0.0.1}:9000:9000"
+      # Players' go-live page, behind the reverse proxy at /go/ (next to MediaMTX's port 8889)
+      - "${MEDIA_HTTP_BIND:-127.0.0.1}:9002:9002"
 
   delay:
     <<: *control

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Go live</title>
+<style>
+  :root { color-scheme: dark; --bg: #16181d; --card: #20232a; --line: #343842; --text: #e8eaed; --dim: #9aa0aa;
+          --accent: #4f8cff; --good: #3fb950; --bad: #f85149; --warn: #d29922; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 520px) { .choices { grid-template-columns: 1fr; } }
+  .choice { text-align: left; background: var(--card); color: var(--text); border: 2px solid var(--line); border-radius: 10px;
+            padding: 16px; font-weight: 400; }
+  .choice b { display: block; font-size: 18px; margin-bottom: 4px; }
+  .choice span { color: var(--dim); font-size: 14px; }
+  .choice:hover { border-color: var(--accent); }
+  .choice[aria-pressed=true] { border-color: var(--accent); background: #1f2b44; }
+  label { display: block; }
+  input[type=text], input[type=password], select { width: 100%; padding: 9px 10px; margin: 4px 0 12px; border-radius: 6px;
+          border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  input:disabled { opacity: .6; }
+  .source { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; padding: 10px 0; }
+  .source + .source { border-top: 1px solid var(--line); }
+  .source input[type=checkbox] { width: 18px; height: 18px; }
+  .source .name { font-weight: 600; }
+  .source .hint, .source .controls { grid-column: 2; }
+  .hint { color: var(--dim); font-size: 14px; }
+  .controls { display: flex; align-items: center; gap: 10px; }
+  .controls input[type=range] { flex: 1; }
+  .meter { width: 90px; height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+  .meter > div { height: 100%; width: 0; background: var(--good); transition: width .08s linear; }
+  .buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 600; padding: 12px 18px; border-radius: 8px; border: 0; cursor: pointer; }
+  #go { background: var(--accent); color: #fff; flex: 1; }
+  #stop { background: var(--bad); color: #fff; }
+  button.small { padding: 7px 12px; background: var(--accent); color: #fff; margin: 6px 0; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { margin: 16px 0; padding: 12px 14px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
+  #status.live { border-color: var(--good); }
+  #status.live::before { content: "\25CF  "; color: var(--good); }
+  #status.bad { border-color: var(--bad); }
+  #status.warn { border-color: var(--warn); }
+  #stats { color: var(--dim); font-size: 14px; margin-top: 4px; }
+  details { color: var(--dim); font-size: 14px; }
+  li { margin-bottom: 8px; }
+  #obs { color: var(--text); }
+  #obs ol { padding-left: 22px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Stream your game</h1>
+  <p class="sub">Share your Balatro game with the tournament. Nobody sees it live: it reaches the casters later.
+    How do you want to stream?</p>
+
+  <div class="choices">
+    <button class="choice" id="pickBrowser" aria-pressed="false"><b>In this browser</b>
+      <span>Nothing to install. Chrome or Edge on a computer.</span></button>
+    <button class="choice" id="pickObs" aria-pressed="false"><b>With OBS</b>
+      <span>More control, and you can pick exactly which programs' sound goes in.</span></button>
+  </div>
+
+  <!-- Streaming from this page -->
+  <div id="browser" hidden>
+    <section class="card">
+      <h2>Your login</h2>
+      <label>Login <input type="text" id="user" autocomplete="username" spellcheck="false" placeholder="e.g. team05-p1"></label>
+      <label>Password <input type="password" id="pass" autocomplete="current-password"></label>
+    </section>
+
+    <section class="card">
+      <h2>Sound</h2>
+      <div class="source">
+        <input type="checkbox" id="sysOn" checked>
+        <label class="name" for="sysOn">Computer sound</label>
+        <div class="hint">Balatro, Discord and anything else playing on your PC. After you share the Balatro window,
+          click <b>Add computer sound</b>, pick <b>Entire screen</b> and tick <b>Share system audio</b>.
+          <br><br><b>Why the entire screen?</b> Browsers can't take the sound of one program, and a shared window
+          comes without sound. The only way they offer your computer's sound is together with your entire screen.
+          This page uses only the sound of that share: viewers still see nothing but your Balatro window.
+          (Want only Balatro's and Discord's sound? Stream with OBS instead.)</div>
+        <div class="controls"><button id="addSys" class="small" hidden>Add computer sound</button></div>
+        <div class="controls"><input type="range" id="sysVol" min="0" max="150" value="100" aria-label="Computer sound volume">
+          <div class="meter"><div id="sysMeter"></div></div></div>
+      </div>
+      <div class="source">
+        <input type="checkbox" id="micOn">
+        <label class="name" for="micOn">Microphone</label>
+        <div class="hint">Your own voice. Only asks for your microphone, never your camera.</div>
+        <div class="controls" id="micControls" hidden>
+          <select id="micDevice" aria-label="Microphone"></select>
+        </div>
+        <div class="controls"><input type="range" id="micVol" min="0" max="150" value="100" aria-label="Microphone volume">
+          <div class="meter"><div id="micMeter"></div></div></div>
+      </div>
+    </section>
+
+    <div class="buttons">
+      <button id="go">Share Balatro and go live</button>
+      <button id="stop" hidden>Stop streaming</button>
+    </div>
+    <div id="status"><span id="statusText">Not streaming.</span><div id="stats"></div><div id="note" class="hint"></div></div>
+
+    <section class="card">
+      <details>
+        <summary>Tips</summary>
+        <ul>
+          <li>Use <b>Chrome</b> or <b>Edge</b>. Firefox can't share computer sound.</li>
+          <li>Keep this tab open while you play. It can be in the background.</li>
+          <li>Switching with your teammate: stop here (or close the tab) first, then they start with their own
+            login. While you're live, theirs is refused.</li>
+          <li>If your connection drops, this page reconnects by itself.</li>
+        </ul>
+      </details>
+    </section>
+  </div>
+
+  <!-- Streaming with OBS: instructions only -->
+  <section class="card" id="obs" hidden>
+    <h2>Stream with OBS</h2>
+    <p>You need the <b>OBS address</b> from your login details: it starts with <code>srt://</code> and already
+      contains your login, so there's nothing to enter here. Don't stream from OBS and the browser at the same time.</p>
+    <ol>
+      <li><b>Settings &rarr; Stream:</b> Service <b>Custom...</b>, Server: paste your OBS address. Leave
+        Stream Key empty.</li>
+      <li><b>Settings &rarr; Output:</b> set Output Mode to <b>Advanced</b>. On the Streaming tab: Video Encoder
+        <b>x264</b> or a hardware <b>H.264</b> encoder (NVIDIA NVENC H.264, AMD H.264, QuickSync H.264), not
+        HEVC or AV1. Bitrate <b>6000 Kbps</b>, Keyframe Interval <b>2 s</b>.</li>
+      <li><b>Settings &rarr; Video:</b> Output (Scaled) Resolution <b>1920x1080</b> (or 1280x720), FPS <b>60</b>
+        (or 30).</li>
+      <li><b>Picture:</b> in Sources, click <b>+</b> &rarr; <b>Game Capture</b> (mode "Capture specific window",
+        pick Balatro), or <b>Window Capture</b> if Game Capture stays black.</li>
+      <li><b>Sound:</b> OBS includes all your computer's sound (Desktop Audio) by default. For only Balatro and
+        Discord: in Sources, click <b>+</b> &rarr; <b>Application Audio Capture</b> twice, pick Balatro and then
+        Discord, and mute <b>Desktop Audio</b> in the Audio Mixer. Your microphone is <b>Mic/Aux</b>: mute it if
+        you don't want it.</li>
+      <li>Click <b>Start Streaming</b>. To hand over to your teammate, click <b>Stop Streaming</b> first.
+        OBS reconnects by itself if your connection drops.</li>
+    </ol>
+  </section>
+</main>
+<script src="/go/publish.js"></script>
+</body>
+</html>

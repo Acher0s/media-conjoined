@@ -21,6 +21,8 @@ API_TOKEN = _env("CONTROL_API_TOKEN")
 API_PORT = _int("CONTROL_API_PORT", 9000)
 # MediaMTX's auth hook; only reachable inside the compose network
 AUTH_PORT = _int("CONTROL_AUTH_PORT", 9001)
+# Public pages (the players' go-live page), behind the reverse proxy at /go/
+PAGES_PORT = _int("CONTROL_PAGES_PORT", 9002)
 
 # -- storage ---------------------------------------------------------------------
 DB_PATH = Path(_env("DB_PATH", "/data/control.db"))

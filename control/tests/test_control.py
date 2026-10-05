@@ -2,6 +2,7 @@
 
 Run from control/:  python -m pytest tests
 """
+import asyncio
 import os
 import time
 from pathlib import Path
@@ -58,7 +59,7 @@ def test_export_links(conn):
     roster.sync(conn, [team("team05", "Jimbo", ("1", "alice"))], [{"discord_id": "9", "name": "anna"}])
     data = roster.export(conn)
     p = data["players"][0]
-    assert p["team_name"] == "Jimbo" and p["browser_url"].endswith("/team05/publish")
+    assert p["team_name"] == "Jimbo" and p["browser_url"].endswith(f"/go/#team05-p1:{p['password']}")
     assert f"streamid=publish:team05:team05-p1:{p['password']}" in p["srt_url"]
     c = data["casters"][0]
     assert len(c["feeds"]) == len(config.SLOTS) and c["feeds"][0]["path"] == "s1t1-delayed"
@@ -186,3 +187,26 @@ def test_concat_list_places_segments_by_their_start(tmp_path):
     # to the next start (minus the inpoint on the first), own length before the gap, none on the last
     assert durations == pytest.approx([2.8, 4.2, 4.0])
     assert [x for x in lines if x.startswith(("inpoint", "outpoint"))] == ["inpoint 1.000000", "outpoint 2.000000"]
+
+
+# -- go-live page -----------------------------------------------------------------
+
+def test_go_live_page_served_for_team_paths_only():
+    from aiohttp.test_utils import TestClient, TestServer
+    from mediactl import pages
+
+    async def check():
+        async with TestClient(TestServer(pages.make_app())) as client:
+            for url in ("/go/", "/go/team05"):
+                r = await client.get(url)
+                assert r.status == 200 and "text/html" in r.headers["Content-Type"]
+            r = await client.get("/go", allow_redirects=False)
+            assert r.status == 302 and r.headers["Location"] == "/go/"
+            r = await client.get("/go/")
+            assert '<script src="/go/publish.js">' in await r.text() and r.headers["X-Frame-Options"] == "DENY"
+            r = await client.get("/go/publish.js")
+            assert r.status == 200 and "javascript" in r.headers["Content-Type"]
+            assert (await client.get("/go/team99")).status == 404
+            assert (await client.get("/go/s1t1-delayed")).status == 404
+
+    asyncio.run(check())

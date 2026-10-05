@@ -1,11 +1,12 @@
-"""Runs the bot API (CONTROL_API_PORT) and MediaMTX's auth hook (CONTROL_AUTH_PORT), and polls MediaMTX."""
+"""Runs the bot API (CONTROL_API_PORT), MediaMTX's auth hook (CONTROL_AUTH_PORT) and the players'
+go-live page (CONTROL_PAGES_PORT), and polls MediaMTX."""
 import asyncio
 import logging
 
 import aiohttp
 from aiohttp import web
 
-from . import api, auth, config, db
+from . import api, auth, config, db, pages
 from .live import LiveState, MediaMTX
 
 log = logging.getLogger("mediactl")
@@ -35,12 +36,15 @@ async def main() -> None:
     async with aiohttp.ClientSession() as session:
         live = LiveState(conn, MediaMTX(session))
         runners = []
-        for app, port in ((api.make_app(conn, live), config.API_PORT), (make_auth_app(conn, live), config.AUTH_PORT)):
+        apps = ((api.make_app(conn, live), config.API_PORT), (make_auth_app(conn, live), config.AUTH_PORT),
+                (pages.make_app(), config.PAGES_PORT))
+        for app, port in apps:
             runner = web.AppRunner(app, access_log=None)
             await runner.setup()
             await web.TCPSite(runner, "0.0.0.0", port).start()
             runners.append(runner)
-        log.info("Bot API on :%d, MediaMTX auth hook on :%d", config.API_PORT, config.AUTH_PORT)
+        log.info("Bot API on :%d, MediaMTX auth hook on :%d, go-live pages on :%d",
+                 config.API_PORT, config.AUTH_PORT, config.PAGES_PORT)
         try:
             await live.run()
         finally:

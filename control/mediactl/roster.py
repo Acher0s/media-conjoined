@@ -94,8 +94,10 @@ def _srt_url(mode: str, path: str, login: str, password: str) -> str:
 def player_links(row) -> dict:
     path = row["team_path"]
     return {
-        # MediaMTX's own browser publishing page; it asks for the login and password
-        "browser_url": f"{config.BROWSER_BASE}/{path}/publish",
+        # The go-live page (pages.py), with the login filled in: the part after '#' never leaves the
+        # player's browser. The same page without it (/go/) works for everyone.
+        "browser_url": f"{config.BROWSER_BASE}/go/#{quote(row['login'], safe='')}:"
+                       f"{quote(row['password'], safe='')}",
         "srt_url": _srt_url("publish", path, row["login"], row["password"]),
     }
 
