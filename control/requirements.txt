@@ -1,1 +1,3 @@
 aiohttp>=3.9,<4
+# Twitch passthrough (mediactl/twitch.py)
+streamlink>=6.0

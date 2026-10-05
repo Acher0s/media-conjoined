@@ -48,6 +48,14 @@ DELAYED_SUFFIX = "-delayed"
 
 TEAM_PATH_RE = re.compile(r"^team(\d{2})$")
 DELAYED_PATH_RE = re.compile(r"^(s\d+t[12])-delayed$")
+# Each team's test feed: what a slot would show for that team, watched only by its own players
+PREVIEW_SUFFIX = "-preview"
+PREVIEW_PATH_RE = re.compile(r"^(team\d{2})-preview$")
+# How long a test feed keeps running after the page last asked for it (the page asks every 30 s
+# while someone watches, and stops watching by itself after a few minutes)
+PREVIEW_MINUTES = _float("PREVIEW_MINUTES", 1)
+# At most this many test feeds at once: each one costs ~0.2-0.5 CPU core and ~2 Mbps upload per viewer
+PREVIEW_MAX = _int("PREVIEW_MAX", 8)
 
 # -- delay -----------------------------------------------------------------------
 DEFAULT_DELAY_MINUTES = _float("DEFAULT_DELAY_MINUTES", 30)

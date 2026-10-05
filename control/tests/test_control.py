@@ -191,12 +191,12 @@ def test_concat_list_places_segments_by_their_start(tmp_path):
 
 # -- go-live page -----------------------------------------------------------------
 
-def test_go_live_page_served_for_team_paths_only():
+def test_go_live_page_served_for_team_paths_only(conn):
     from aiohttp.test_utils import TestClient, TestServer
     from mediactl import pages
 
     async def check():
-        async with TestClient(TestServer(pages.make_app())) as client:
+        async with TestClient(TestServer(pages.make_app(conn))) as client:
             for url in ("/go/", "/go/team05"):
                 r = await client.get(url)
                 assert r.status == 200 and "text/html" in r.headers["Content-Type"]
@@ -207,6 +207,78 @@ def test_go_live_page_served_for_team_paths_only():
             r = await client.get("/go/publish.js")
             assert r.status == 200 and "javascript" in r.headers["Content-Type"]
             assert (await client.get("/go/team99")).status == 404
+            assert await (await client.get("/go/delay")).json() == {"minutes": config.DEFAULT_DELAY_MINUTES}
+            db.set_delay(conn, 45, time.time())
+            assert await (await client.get("/go/delay")).json() == {"minutes": 45}
             assert (await client.get("/go/s1t1-delayed")).status == 404
+
+    asyncio.run(check())
+
+
+# -- test feeds and Twitch passthrough --------------------------------------------
+
+def test_players_watch_only_their_own_teams_test_feed(conn):
+    roster.sync(conn, [team("team05", "A", ("1", "alice")), team("team06", "B", ("2", "bob"))],
+                [{"discord_id": "9", "name": "anna"}])
+    pw = lambda login: db.get_login(conn, login)["password"]
+    read = lambda u, p, path: {"action": "read", "user": u, "password": p, "path": path}
+    assert auth.decide(conn, FakeLive(), read("team05-p1", pw("team05-p1"), "team05-preview"))
+    assert not auth.decide(conn, FakeLive(), read("team05-p1", pw("team05-p1"), "team06-preview"))
+    assert not auth.decide(conn, FakeLive(), read("team05-p1", "wrong", "team05-preview"))
+    assert not auth.decide(conn, FakeLive(), read("caster-01", pw("caster-01"), "team05-preview"))
+    delay = {"action": "publish", "user": config.DELAY_USER, "password": config.DELAY_PASSWORD, "path": "team05-preview"}
+    assert auth.decide(conn, FakeLive(), delay)
+    assert not auth.decide(conn, FakeLive(), {**delay, "user": "team05-p1", "password": pw("team05-p1")})
+
+
+def test_twitch_channel_from_name_or_link():
+    from mediactl import twitch
+    for value in ("FalconPlays", "@falconplays", "twitch.tv/FalconPlays", "https://www.twitch.tv/falconplays/",
+                  "https://m.twitch.tv/falconplays?ref=x"):
+        assert twitch.parse_channel(value) == "falconplays"
+    for bad in ("", "ab", "https://youtube.com/falcon", "falcon plays", "x" * 26):
+        with pytest.raises(ValueError):
+            twitch.parse_channel(bad)
+
+
+def test_go_live_endpoints_for_players(conn):
+    import base64
+    from aiohttp.test_utils import TestClient, TestServer
+    from mediactl import pages
+    roster.sync(conn, [team("team05", "Falcon", ("1", "alice"))], [])
+    pw = db.get_login(conn, "team05-p1")["password"]
+    auth_header = {"Authorization": "Basic " + base64.b64encode(f"Team05-P1:{pw}".encode()).decode()}
+
+    async def check():
+        async with TestClient(TestServer(pages.make_app(conn))) as client:
+            assert (await client.get("/go/me")).status == 401
+            bad = {"Authorization": "Basic " + base64.b64encode(b"team05-p1:nope").decode()}
+            assert (await client.get("/go/me", headers=bad)).status == 401
+            me = await (await client.get("/go/me", headers=auth_header)).json()
+            assert me["team"] == "team05" and me["team_name"] == "Falcon" and me["tested"] is False
+            assert me["twitch"]["channel"] is None
+
+            r = await client.post("/go/twitch", headers=auth_header, json={"channel": "twitch.tv/FalconPlays"})
+            assert (await r.json())["channel"] == "falconplays" and db.get_twitch(conn, "team05") == "falconplays"
+            r = await client.post("/go/twitch", headers=auth_header, json={"channel": "not a channel!"})
+            assert r.status == 400 and db.get_twitch(conn, "team05") == "falconplays"
+            await client.post("/go/twitch", headers=auth_header, json={"channel": None})
+            assert db.get_twitch(conn, "team05") is None
+
+            r = await client.post("/go/preview", headers=auth_header)
+            assert (await r.json())["path"] == "team05-preview"
+            assert db.preview_active(conn, "team05", time.time())
+            assert not db.preview_active(conn, "team05", time.time() + config.PREVIEW_MINUTES * 60 + 1)
+            assert not db.preview_active(conn, "team06", time.time())
+            await client.delete("/go/preview", headers=auth_header)
+            assert not db.preview_active(conn, "team05", time.time())
+
+            # At most PREVIEW_MAX test feeds at once; a team whose feed runs may keep asking
+            for n in range(1, config.PREVIEW_MAX + 1):
+                db.request_preview(conn, f"team{n + 5:02d}", time.time() + 60)
+            assert (await client.post("/go/preview", headers=auth_header)).status == 429
+            db.request_preview(conn, "team05", time.time() + 60)
+            db.stop_preview(conn, "team06")
+            assert (await client.post("/go/preview", headers=auth_header)).status == 200
 
     asyncio.run(check())

@@ -8,7 +8,7 @@ import time
 
 from aiohttp import web
 
-from . import config, db, probe, recordings, roster, schedule
+from . import config, db, probe, recordings, roster, schedule, twitch
 
 log = logging.getLogger(__name__)
 
@@ -102,6 +102,7 @@ def make_app(conn, live) -> web.Application:
         names = db.team_names(conn)
         logins = db.active_logins(conn)
         by_login = {r["login"]: r for r in logins}
+        passthrough = twitch.status(conn)
         teams = []
         for path in config.TEAM_PATHS:
             info = live.teams.get(path)
@@ -117,6 +118,8 @@ def make_app(conn, live) -> web.Application:
                 entry["last_refused"] = {"login": refused["login"], "at": refused["at"],
                                          "discord_id": row["discord_id"] if row else None,
                                          "name": row["name"] if row else None}
+            if path in passthrough:
+                entry["twitch"] = passthrough[path]
             teams.append(entry)
         minutes, _ = _delay(conn)
         now = time.time()
@@ -137,6 +140,8 @@ def make_app(conn, live) -> web.Application:
         path = _team_path(request.match_info["path"])
         info = live.teams.get(path)
         result = {"path": path, "name": db.team_names(conn).get(path), "live": info is not None}
+        if path in (passthrough := twitch.status(conn)):
+            result["twitch"] = passthrough[path]
         if info:
             row = db.get_login(conn, info.get("login") or "")
             result.update(login=info.get("login"), player_name=row["name"] if row else None,
@@ -158,6 +163,16 @@ def make_app(conn, live) -> web.Application:
             return _error(502, "MediaMTX refused the kick")
         log.info("Kicked %s from %s", login, path)
         return web.json_response({"kicked": True, "path": path, "login": login})
+
+    @routes.put("/teams/{path}/twitch")
+    async def set_twitch(request):
+        """Twitch passthrough on ({"channel": name or twitch.tv link}) or off ({"channel": null})."""
+        path = _team_path(request.match_info["path"])
+        value = (await _json(request)).get("channel")
+        channel = twitch.parse_channel(value) if value else None
+        db.set_twitch(conn, path, channel, "bot", time.time())
+        log.info("Twitch passthrough for %s: %s (bot)", path, channel or "off")
+        return web.json_response({"path": path, "channel": channel})
 
     # -- slots -------------------------------------------------------------------
 

@@ -15,8 +15,33 @@
   .sub { color: var(--dim); margin: 0 0 24px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
   .card h2 { font-size: 15px; margin: 0 0 12px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
-  @media (max-width: 520px) { .choices { grid-template-columns: 1fr; } }
+  .choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 640px) { .choices { grid-template-columns: 1fr; } }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 4px; padding: 1px 6px; margin-top: 6px; }
+  .tag.rec { background: #1d3b26; color: var(--good); }
+  .tag.norec { background: #3d3115; color: var(--warn); }
+  .callout { border-left: 3px solid var(--warn); padding: 8px 12px; background: #2a2618; border-radius: 6px; margin: 12px 0; }
+  .callout.info { border-color: var(--accent); background: #1c2436; }
+  .big { font-size: 22px; font-weight: 700; color: var(--text); }
+  #twitchState, #previewState { margin-top: 8px; }
+  .loginbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--card);
+              border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
+  .loginbar input { flex: 1; min-width: 150px; margin: 0; }
+  .loginbar .who { flex: 1; }
+  #loginHint, #loginError { margin: 0 0 12px 4px; }
+  #loginError { color: var(--bad); }
+  button.link { background: none; color: var(--accent); padding: 4px 6px; font-weight: 600; }
+  .banner { border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; border: 2px solid var(--line); background: var(--card); }
+  .banner h3 { margin: 0 0 6px; font-size: 20px; }
+  .banner p { margin: 4px 0; }
+  .banner ol { margin: 8px 0; padding-left: 22px; }
+  .banner li { margin-bottom: 2px; }
+  .banner.untested { border-color: var(--warn); background: #2a2618; }
+  .banner.tested { border-color: var(--good); background: #16281c; }
+  .banner button { margin-top: 6px; }
+  #test { border: 2px solid var(--accent); }
+  #checkTest { margin-top: 10px; }
+  video { width: 100%; border-radius: 8px; background: #000; margin-top: 10px; }
   .choice { text-align: left; background: var(--card); color: var(--text); border: 2px solid var(--line); border-radius: 10px;
             padding: 16px; font-weight: 400; }
   .choice b { display: block; font-size: 18px; margin-bottom: 4px; }
@@ -51,8 +76,11 @@
   #stats { color: var(--dim); font-size: 14px; margin-top: 4px; }
   details { color: var(--dim); font-size: 14px; }
   li { margin-bottom: 8px; }
-  #obs { color: var(--text); }
-  #obs ol { padding-left: 22px; }
+  #obs, #twitch { color: var(--text); }
+  #obs ol, #twitch ol { padding-left: 22px; }
+  .twitchButtons { display: flex; gap: 10px; flex-wrap: wrap; }
+  #twitchUse { background: #9146ff; color: #fff; }
+  #twitchOff { background: var(--line); color: var(--text); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -60,23 +88,37 @@
 <main>
   <h1>Stream your game</h1>
   <p class="sub">Share your Balatro game with the tournament. Nobody sees it live: it reaches the casters later.
-    How do you want to stream?</p>
+    Pick one of three ways:</p>
 
   <div class="choices">
     <button class="choice" id="pickBrowser" aria-pressed="false"><b>In this browser</b>
-      <span>Nothing to install. Chrome or Edge on a computer.</span></button>
+      <span>Nothing to install. Chrome or Edge on a computer.</span><br><span class="tag rec">Recorded</span></button>
     <button class="choice" id="pickObs" aria-pressed="false"><b>With OBS</b>
-      <span>More control, and you can pick exactly which programs' sound goes in.</span></button>
+      <span>More control over picture and sound.</span><br><span class="tag rec">Recorded</span></button>
+    <button class="choice" id="pickTwitch" aria-pressed="false"><b>Via your Twitch stream</b>
+      <span>Already live on Twitch? The casters can use it, with a required delay.</span><br>
+      <span class="tag norec">Not recorded on its own</span></button>
+  </div>
+
+  <!-- Login (to stream from the browser, connect Twitch, watch the test feed) and whether you've tested -->
+  <div id="login" hidden>
+    <form class="loginbar" id="loginForm">
+      <input type="text" id="user" autocomplete="username" spellcheck="false" placeholder="Login, e.g. team05-p1"
+             aria-label="Login">
+      <input type="password" id="pass" autocomplete="current-password" placeholder="Password" aria-label="Password">
+      <button class="small" id="loginGo" type="submit">Log in</button>
+    </form>
+    <div class="loginbar" id="loginDone" hidden>
+      <span class="who">Logged in as <b id="whoLogin"></b> <span class="hint" id="whoMore"></span></span>
+      <button class="link" id="loginChange">Change</button>
+    </div>
+    <p class="hint" id="loginHint"></p>
+    <p class="hint" id="loginError"></p>
+    <div class="banner" id="banner"></div>
   </div>
 
   <!-- Streaming from this page -->
   <div id="browser" hidden>
-    <section class="card">
-      <h2>Your login</h2>
-      <label>Login <input type="text" id="user" autocomplete="username" spellcheck="false" placeholder="e.g. team05-p1"></label>
-      <label>Password <input type="password" id="pass" autocomplete="current-password"></label>
-    </section>
-
     <section class="card">
       <h2>Sound</h2>
       <div class="source">
@@ -108,7 +150,9 @@
       <button id="go">Share Balatro and go live</button>
       <button id="stop" hidden>Stop streaming</button>
     </div>
-    <div id="status"><span id="statusText">Not streaming.</span><div id="stats"></div><div id="note" class="hint"></div></div>
+    <div id="status"><span id="statusText">Not streaming.</span><div id="stats"></div><div id="note" class="hint"></div>
+      <button class="small" id="checkTest" hidden>You're live: now check your test feed &darr;</button></div>
+    <div class="testSlot" data-mode="browser"></div>
 
     <section class="card">
       <details>
@@ -129,12 +173,16 @@
     <h2>Stream with OBS</h2>
     <p>You need the <b>OBS address</b> from your login details: it starts with <code>srt://</code> and already
       contains your login, so there's nothing to enter here. Don't stream from OBS and the browser at the same time.</p>
+    <p class="callout info">Is your OBS already streaming to Twitch? OBS can only stream to one place at a time:
+      choose <b>Via your Twitch stream</b> above instead.</p>
     <ol>
       <li><b>Settings &rarr; Stream:</b> Service <b>Custom...</b>, Server: paste your OBS address. Leave
         Stream Key empty.</li>
       <li><b>Settings &rarr; Output:</b> set Output Mode to <b>Advanced</b>. On the Streaming tab: Video Encoder
         <b>x264</b> or a hardware <b>H.264</b> encoder (NVIDIA NVENC H.264, AMD H.264, QuickSync H.264), not
-        HEVC or AV1. Bitrate <b>6000 Kbps</b>, Keyframe Interval <b>2 s</b>.</li>
+        HEVC or AV1. Bitrate <b>6000 Kbps</b>, Keyframe Interval <b>2 s</b>, and no B-frames: <b>Max B-frames 0</b>
+        (NVIDIA/AMD/QuickSync), or for x264 type <code>bframes=0</code> under <b>x264 Options</b>. Browsers can't
+        play video with B-frames, so without this casters can't watch you in a browser.</li>
       <li><b>Settings &rarr; Video:</b> Output (Scaled) Resolution <b>1920x1080</b> (or 1280x720), FPS <b>60</b>
         (or 30).</li>
       <li><b>Picture:</b> in Sources, click <b>+</b> &rarr; <b>Game Capture</b> (mode "Capture specific window",
@@ -145,7 +193,80 @@
         you don't want it.</li>
       <li>Click <b>Start Streaming</b>. To hand over to your teammate, click <b>Stop Streaming</b> first.
         OBS reconnects by itself if your connection drops.</li>
+      <li><b>Test it:</b> log in at the top and watch your test feed below.</li>
     </ol>
+    <div class="testSlot" data-mode="obs"></div>
+  </section>
+  <!-- Streaming via Twitch: passthrough, with the required delay -->
+  <section class="card" id="twitch" hidden>
+    <h2>Stream via your Twitch stream</h2>
+    <p>Keep streaming to Twitch with OBS as usual. While your team is on a tournament feed, the casters see your
+      Twitch stream.</p>
+
+    <ol>
+      <li><b>Required: delay your Twitch stream by exactly the tournament delay.</b>
+        <div class="callout">The tournament delay is now <span class="big"><span class="delayMin">15</span> minutes</span>
+          = <span class="big"><span class="delaySec">900</span> seconds</span>.</div>
+        In OBS: <b>Settings &rarr; Advanced &rarr; Stream Delay</b>: tick <b>Enable</b>, set Duration to
+        <b><span class="delaySec">900</span> seconds</b>, and tick <b>Preserve cutoff point when reconnecting</b>.
+        OBS only applies it when a stream starts: if you're live already, stop your stream and start it again.
+        <ul>
+          <li><b>Why:</b> without it, your opponents could watch your game live.</li>
+          <li><b>Why exactly:</b> the casters show your game next to your opponent's. A longer or shorter delay puts
+            your game out of step with theirs.</li>
+          <li>If the tournament delay changes, this number changes too (this page keeps it up to date): change OBS
+            and restart your stream.</li>
+        </ul></li>
+      <li><b>Connect your Twitch channel</b> with your login (above):
+        <label>Twitch channel <input type="text" id="twitchChannel" spellcheck="false" placeholder="e.g. twitch.tv/yourname"></label>
+        <div class="twitchButtons">
+          <button id="twitchUse">Use my Twitch stream</button>
+          <button id="twitchOff">Stop using it</button>
+        </div>
+        <div id="twitchState" class="hint"></div></li>
+      <li><b>Strongly recommended: also stream to the tournament directly.</b> Your Twitch stream isn't recorded,
+        so without this your games are missing from the tournament's archive and VODs. It doesn't change what
+        the casters see. Choose <b>In this browser</b> above and go live there as well, at the same time as Twitch
+        (pick the Balatro window itself, not OBS's preview). Your Twitch stream isn't affected.
+        <div><button class="small" id="alsoDirect">Also stream directly from this browser</button></div></li>
+      <li><b>Test it:</b> watch your test feed below. It shows your Twitch stream, the way the casters will.</li>
+    </ol>
+    <div class="testSlot" data-mode="twitch"></div>
+
+    <details>
+      <summary>Good to know</summary>
+      <ul>
+        <li>The casters see your <b>whole</b> Twitch stream: overlays, webcam and scene switches included. Keep
+          Balatro on screen during your matches.</li>
+        <li>Ad breaks show as a pause screen on the feed: avoid running ads during your matches.</li>
+        <li>Twitch itself adds a few seconds of lag, so your game can be slightly behind your opponent's.</li>
+        <li>Optional: setting <b>Max B-frames</b> to <b>0</b> in OBS's encoder settings (x264: <code>bframes=0</code>
+          under x264 Options) lets the casters watch your stream in a browser too; in OBS it works either way.</li>
+        <li>Handing over to your teammate: they connect their own Twitch channel here with their login, or click
+          <b>Stop using it</b> and stream another way.</li>
+      </ul>
+    </details>
+  </section>
+  <!-- Testing, for every way of streaming -->
+  <section class="card" id="test" hidden>
+    <h2>Test your setup (required once)</h2>
+    <p>Your <b>test feed</b> is exactly what the casters will get from you: your game, <b><span class="delayMin">15</span>
+      minute(s)</b> after you play it (the tournament delay). Until then it shows the tournament's waiting screen.
+      Only your team can watch it.</p>
+    <ol>
+      <li>Go live (above), the way you chose.</li>
+      <li>Watch your test feed and check that you <b>see and hear</b> your game.</li>
+      <li>Done: the banner at the top turns green by itself once the tournament has received your stream.</li>
+    </ol>
+    <div class="buttons">
+      <button class="small" id="watch">Watch my test feed</button>
+      <button class="small" id="unwatch" hidden>Stop watching</button>
+    </div>
+    <video id="preview" controls autoplay playsinline muted hidden></video>
+    <div id="previewState" class="hint"></div>
+    <p class="hint">It stops by itself after 3 minutes, to keep the server free for other players: watch again if
+      you need more time. Keep it muted while you stream your computer sound, or its sound ends up in your stream.
+      Tip: open this page on your phone and watch it there instead.</p>
   </section>
 </main>
 <script src="/go/publish.js"></script>

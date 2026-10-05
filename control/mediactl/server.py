@@ -37,7 +37,7 @@ async def main() -> None:
         live = LiveState(conn, MediaMTX(session))
         runners = []
         apps = ((api.make_app(conn, live), config.API_PORT), (make_auth_app(conn, live), config.AUTH_PORT),
-                (pages.make_app(), config.PAGES_PORT))
+                (pages.make_app(conn), config.PAGES_PORT))
         for app, port in apps:
             runner = web.AppRunner(app, access_log=None)
             await runner.setup()

@@ -13,6 +13,17 @@ at a gap in the recordings, at the next slot assignment, or at the newest comple
 the next run starts right where it left off. MediaMTX keeps casters connected between runs and
 shows the slate whenever nothing is published (alwaysAvailable in mediamtx.yml).
 
+Twitch passthrough: when the team on the slot at feed time has a Twitch channel set (twitch.py),
+the player relays that channel live instead (streamlink -> ffmpeg, audio to Opus), because the
+player's own Twitch delay already puts it at feed time. It stops when the slot changes team or the
+setting changes; while the channel is offline (or showing an ad break) the slate shows.
+
+Test feeds: a PreviewPlayer per team plays that team into `teamNN-preview` the same way, while the
+team's go-live page asks for it (db.request_preview), so players can watch their own setup exactly as
+the casters would get it. Test feeds are watched in the browser, which (WebRTC) can't play H.264 with
+B-frames, OBS's default and most Twitch streams'; so they re-encode the video (at most 720p30,
+2 Mbps, no B-frames). Slot feeds copy it: casters watching in OBS over SRT get B-frames fine.
+
 Delay changes: a longer delay holds (slate) until feed time catches up with where the feed was;
 a shorter one jumps forward. Videos must be H.264 (all readers can play it); other codecs show the
 slate and are reported as unsupported in the status file.
@@ -26,7 +37,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import config, db, probe, recordings
+from . import config, db, probe, recordings, twitch
 
 log = logging.getLogger("mediactl.delay")
 
@@ -35,9 +46,21 @@ POLL_SECONDS = 1.0
 SKIP_TOLERANCE = 5.0
 # A segment counts as complete once nothing has been written to it for this long
 SETTLE_SECONDS = 3.0
+# How long to wait before trying an offline Twitch channel again
+TWITCH_RETRY_SECONDS = 15.0
+# Start this many Twitch segments (about 2 s each) behind live: a cushion against late segments
+TWITCH_LIVE_EDGE = 5
+
+
+# Re-encoding for the test feeds: plays in any browser, cheap enough for several at a time
+BROWSER_VIDEO = ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-bf", "0", "-g", "60",
+                 "-b:v", "2M", "-maxrate", "2M", "-bufsize", "4M", "-pix_fmt", "yuv420p",
+                 "-vf", "scale=-2:'min(720,ih)',fps=30"]
 
 
 class SlotPlayer:
+    video_codec = ["-c:v", "copy"]
+
     def __init__(self, slot: str, conn, probes: probe.ProbeCache, status: dict):
         self.slot = slot
         self.conn = conn
@@ -48,6 +71,17 @@ class SlotPlayer:
 
     def _set_status(self, state: str, **extra) -> None:
         self.status[self.slot] = {"state": state, "updated_at": time.time(), **extra}
+
+    # A slot feed follows the slot assignments (PreviewPlayer overrides these three)
+    @property
+    def output(self) -> str:
+        return f"{self.slot}{config.DELAYED_SUFFIX}"
+
+    def _team_at(self, at: float) -> str | None:
+        return db.assignment_at(self.conn, self.slot, at)
+
+    def _next_change(self, after: float) -> float | None:
+        return db.next_assignment_change(self.conn, self.slot, after)
 
     def _delay(self) -> float:
         return db.get_delay(self.conn, config.DEFAULT_DELAY_MINUTES)[0] * 60
@@ -74,11 +108,16 @@ class SlotPlayer:
             await asyncio.sleep(min(POLL_SECONDS, self.position - target))
             return
         start = target if self.position is None or target > self.position + SKIP_TOLERANCE else self.position
-        team = db.assignment_at(self.conn, self.slot, start)
+        team = self._team_at(start)
         if team is None:
             self.position = None
             self._set_status("idle")
             await asyncio.sleep(POLL_SECONDS)
+            return
+        channel = db.get_twitch(self.conn, team)
+        if channel is not None:
+            self.position = None  # back on the recording, continue from feed time
+            await self._relay(team, channel)
             return
 
         segs = recordings.segments(config.RECORDINGS_DIR / team)
@@ -88,7 +127,7 @@ class SlotPlayer:
             await asyncio.sleep(POLL_SECONDS)
             return
 
-        stop_at = db.next_assignment_change(self.conn, self.slot, start)
+        stop_at = self._next_change(start)
         run = recordings.contiguous_from(segs, i, stop_at=stop_at, complete_before=now - SETTLE_SECONDS)
         if not run:
             await asyncio.sleep(POLL_SECONDS)
@@ -123,8 +162,7 @@ class SlotPlayer:
             f.write(recordings.concat_list(run, content_start))
             listfile = f.name
 
-        url = f"{config.MEDIAMTX_RTSP}/{self.slot}{config.DELAYED_SUFFIX}"
-        url = url.replace("rtsp://", f"rtsp://{config.DELAY_USER}:{config.DELAY_PASSWORD}@", 1)
+        url = self._publish_url()
         reader_cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
                       "-f", "concat", "-safe", "0", "-i", listfile,
                       "-map", "0:v:0"] + (["-map", "0:a:0"] if has_audio else []) + \
@@ -136,7 +174,7 @@ class SlotPlayer:
         else:  # MediaMTX expects H264 + Opus on the delayed feeds: add silence
             publisher_cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "0:v:0", "-map", "1:a:0",
                               "-shortest"]
-        publisher_cmd += ["-c:v", "copy", "-c:a", "libopus", "-b:a", "96k", "-ar", "48000", "-ac", "2",
+        publisher_cmd += [*self.video_codec, "-c:a", "libopus", "-b:a", "96k", "-ar", "48000", "-ac", "2",
                           "-f", "rtsp", "-rtsp_transport", "tcp", url]
 
         read_fd, write_fd = os.pipe()
@@ -172,6 +210,47 @@ class SlotPlayer:
             await self._stop()
             Path(listfile).unlink(missing_ok=True)
 
+    def _publish_url(self) -> str:
+        url = f"{config.MEDIAMTX_RTSP}/{self.output}"
+        return url.replace("rtsp://", f"rtsp://{config.DELAY_USER}:{config.DELAY_PASSWORD}@", 1)
+
+    async def _relay(self, team: str, channel: str) -> None:
+        """Twitch passthrough: relay the team's live Twitch stream until the slot or the setting changes."""
+        reader_cmd = ["streamlink", "--stdout", "--twitch-disable-ads", "--retry-open", "2",
+                      "--hls-live-edge", str(TWITCH_LIVE_EDGE), twitch.url(channel), "best"]
+        # Twitch arrives in bursts of a few seconds (HLS segments); -re sends it on at playback speed, or
+        # browsers would show it stuttering. Starting TWITCH_LIVE_EDGE segments back gives the cushion.
+        publisher_cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-re", "-f", "mpegts", "-i", "pipe:0",
+                         "-map", "0:v:0", "-map", "0:a:0?", *self.video_codec, "-c:a", "libopus", "-b:a", "96k",
+                         "-ar", "48000", "-ac", "2", "-f", "rtsp", "-rtsp_transport", "tcp", self._publish_url()]
+        read_fd, write_fd = os.pipe()
+        try:
+            reader = await asyncio.create_subprocess_exec(*reader_cmd, stdout=write_fd,
+                                                          stderr=asyncio.subprocess.DEVNULL)
+            publisher = await asyncio.create_subprocess_exec(*publisher_cmd, stdin=read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+        self._procs = [reader, publisher]
+        log.info("[%s] relaying twitch.tv/%s for %s", self.slot, channel, team)
+        started = time.time()
+        try:
+            while publisher.returncode is None:
+                self._set_status("twitch", team=team, channel=channel, since=started)
+                if self._team_at(time.time() - self._delay()) != team or \
+                        db.get_twitch(self.conn, team) != channel:
+                    log.info("[%s] slot or Twitch setting changed, stopping the relay", self.slot)
+                    return
+                try:
+                    await asyncio.wait_for(publisher.wait(), POLL_SECONDS)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            await self._stop()
+        # The stream ended or never started (channel offline): slate, then try again
+        self._set_status("twitch_offline", team=team, channel=channel)
+        await asyncio.sleep(TWITCH_RETRY_SECONDS)
+
     async def _stop(self) -> None:
         for proc in self._procs:
             if proc.returncode is None:
@@ -185,6 +264,26 @@ class SlotPlayer:
             except asyncio.TimeoutError:
                 proc.kill()
         self._procs = []
+
+
+class PreviewPlayer(SlotPlayer):
+    """A team's test feed: plays that team (recording or Twitch passthrough) into teamNN-preview, the
+    same way a slot feed would, while the team's go-live page keeps asking for it."""
+    video_codec = BROWSER_VIDEO
+
+    def __init__(self, team: str, conn, probes: probe.ProbeCache, status: dict):
+        super().__init__(f"{team}{config.PREVIEW_SUFFIX}", conn, probes, status)
+        self.team = team
+
+    @property
+    def output(self) -> str:
+        return self.slot
+
+    def _team_at(self, at: float) -> str | None:
+        return self.team if db.preview_active(self.conn, self.team, time.time()) else None
+
+    def _next_change(self, after: float) -> float | None:
+        return None
 
 
 async def write_status(status: dict) -> None:
@@ -204,9 +303,10 @@ async def main() -> None:
     conn = db.connect(config.DB_PATH)
     probes = probe.ProbeCache()
     status: dict = {}
-    players = [SlotPlayer(slot, conn, probes, status) for slot in config.SLOTS]
-    log.info("Delay players for %d slots", len(players))
-    await asyncio.gather(write_status(status), *(p.run() for p in players))
+    players = [SlotPlayer(slot, conn, probes, status) for slot in config.SLOTS] + \
+              [PreviewPlayer(team, conn, probes, status) for team in config.TEAM_PATHS]
+    log.info("Delay players for %d slots and %d test feeds", len(config.SLOTS), len(config.TEAM_PATHS))
+    await asyncio.gather(write_status(status), twitch.watch(conn), *(p.run() for p in players))
 
 
 if __name__ == "__main__":

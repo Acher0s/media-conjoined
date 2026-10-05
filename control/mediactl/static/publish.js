@@ -1,10 +1,13 @@
 "use strict";
-// The players' "go live" page (served at /go/): they choose between streaming from this browser
-// and OBS. In the browser it shares the screen and publishes it to MediaMTX over WHIP (WebRTC) as
-// H.264 video plus one audio track that mixes the computer sound and, optionally, a microphone.
-// Nothing here touches the camera. The team comes from the login (team05-p1 -> team05); MediaMTX is
-// on the same site, so its WHIP endpoint is /<team path>/whip, and it checks the login with the
-// control service like any publish. For OBS the page only shows instructions.
+// The players' "go live" page (served at /go/). They choose one of three ways to stream:
+//  * this browser: shares the screen and publishes it to MediaMTX over WHIP (WebRTC) as H.264 video
+//    plus one audio track mixing the computer sound and, optionally, a microphone. No camera.
+//  * OBS: instructions only (their SRT address already contains their login).
+//  * their Twitch stream: instructions with the required delay, and connecting their channel
+//    (Twitch passthrough, /go/twitch).
+// For every way, "Test your setup" plays their team's test feed (teamNN-preview, over WHEP): what
+// the casters would get from them, one delay later. The team comes from the login
+// (team05-p1 -> team05); MediaMTX is on the same site and checks the login with the control service.
 
 const LOGIN_RE = /^(team\d{2})-p\d+$/;
 const LOGIN_KEY = "golive:login";
@@ -44,12 +47,280 @@ function credentials() {
   return {user: $("user").value.trim().toLowerCase(), pass: $("pass").value.trim()};
 }
 
+// The login typed in, or null after explaining what's wrong in `show`
+function checkedLogin(show) {
+  const c = credentials();
+  if (!c.user || !c.pass) {
+    show("Enter your login and password first (at the top).");
+    return null;
+  }
+  if (!LOGIN_RE.test(c.user)) {
+    show("That isn't a player login: they look like team05-p1.");
+    return null;
+  }
+  return c;
+}
+
+const LOGIN_HINTS = {
+  browser: "Your login from the tournament: to stream from this browser and to watch your test feed.",
+  obs: "Your login from the tournament: only to watch your test feed (OBS's address already contains it).",
+  twitch: "Your login from the tournament: to connect your Twitch channel and to watch your test feed.",
+};
+
 function choose(mode) {
-  if (wantLive && mode !== "browser") return;  // stop streaming here first
-  $("browser").hidden = mode !== "browser";
-  $("obs").hidden = mode !== "obs";
-  $("pickBrowser").setAttribute("aria-pressed", String(mode === "browser"));
-  $("pickObs").setAttribute("aria-pressed", String(mode === "obs"));
+  for (const [name, button] of [["browser", "pickBrowser"], ["obs", "pickObs"], ["twitch", "pickTwitch"]]) {
+    $(name).hidden = name !== mode;
+    $(button).setAttribute("aria-pressed", String(name === mode));
+  }
+  // The test section follows the chosen way's main action
+  document.querySelector(`.testSlot[data-mode="${mode}"]`).append($("test"));
+  $("login").hidden = $("test").hidden = false;
+  $("loginHint").textContent = LOGIN_HINTS[mode];
+  refreshMe();
+}
+
+function goToTest() {
+  $("test").scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+// -- login bar and test banner: what the tournament knows about this player ---------------------------
+
+let meTimer = null;
+let loggedIn = false;
+
+function showLoggedIn(data) {
+  loggedIn = Boolean(data);
+  $("loginForm").hidden = loggedIn;
+  $("loginDone").hidden = !loggedIn;
+  if (data) {
+    $("whoLogin").textContent = data.login;
+    $("whoMore").textContent = `(${data.name} \u00b7 ${data.team_name || data.team})`;
+    $("loginError").textContent = "";
+  }
+  showBanner(data);
+}
+
+function showBanner(data) {
+  const banner = $("banner");
+  const button = (label) => `<button class="small" data-go-test>${label}</button>`;
+  if (!data) {
+    banner.className = "banner";
+    banner.innerHTML = "<p>Log in to see whether you've tested your setup. <b>Every player has to test once before " +
+                       "the event.</b></p>";
+  } else if (data.tested) {
+    const when = new Date(data.tested_at * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"});
+    banner.className = "banner tested";
+    banner.innerHTML = `<h3>\u2705 Your setup is tested</h3><p>The tournament received a working stream from you ` +
+                       `(${when}). Changed something since? Test again any time.</p>${button("Test again \u2193")}`;
+  } else {
+    banner.className = "banner untested";
+    banner.innerHTML = "<h3>\u26a0\ufe0f You haven't tested your setup yet</h3>" +
+      "<p><b>Every player has to test once before the event.</b> It takes a few minutes:</p>" +
+      "<ol><li>Go live, the way you chose below.</li><li>Watch your test feed and check that you see and hear your " +
+      "game.</li><li>This banner turns green by itself.</li></ol>" + button("Go to the test \u2193");
+  }
+  const go = banner.querySelector("[data-go-test]");
+  if (go) go.addEventListener("click", goToTest);
+}
+
+async function refreshMe() {
+  clearTimeout(meTimer);
+  meTimer = setTimeout(refreshMe, watching ? 10000 : 30000);
+  const c = credentials();
+  if (!c.user || !c.pass || !LOGIN_RE.test(c.user)) {
+    showLoggedIn(null);
+    return;
+  }
+  let res, data;
+  try {
+    res = await fetch("/go/me", {headers: {"Authorization": basicAuth(c)}, cache: "no-store"});
+    data = await res.json();
+  } catch (e) {
+    return;  // keep showing what we had
+  }
+  if (!res.ok) {
+    showLoggedIn(null);
+    $("loginError").textContent = data.error || "Couldn't check your login.";
+    return;
+  }
+  try { sessionStorage.setItem(LOGIN_KEY, JSON.stringify(c)); } catch (e) { /* private mode */ }
+  showLoggedIn(data);
+  showTwitch(data.twitch);
+}
+
+function logIn(e) {
+  e.preventDefault();
+  const c = checkedLogin((text) => { $("loginError").textContent = text; });
+  if (c) refreshMe();
+}
+
+function changeLogin() {
+  if (wantLive) return;  // stop streaming first
+  $("loginForm").hidden = false;
+  $("loginDone").hidden = true;
+  $("user").focus();
+}
+
+// -- Twitch passthrough -----------------------------------------------------------------------------
+
+function showTwitch(state) {
+  if (!state || !state.channel) {
+    $("twitchState").textContent = "Your team isn't using a Twitch stream.";
+    return;
+  }
+  if (!$("twitchChannel").value) $("twitchChannel").value = state.channel;
+  const live = state.live === true ? "live right now" : state.live === false ? "offline right now" : "checking whether it's live...";
+  $("twitchState").textContent = `While your team is on a feed, the casters see twitch.tv/${state.channel} (${live}).`;
+}
+
+async function setTwitch(channel) {
+  const c = checkedLogin((text) => { $("twitchState").textContent = text; });
+  if (!c) return;
+  let res, data;
+  try {
+    res = await fetch("/go/twitch", {
+      method: "POST",
+      headers: {"Authorization": basicAuth(c), "Content-Type": "application/json"},
+      body: JSON.stringify({channel}),
+    });
+    data = await res.json();
+  } catch (e) {
+    $("twitchState").textContent = "Can't reach the stream server. Try again in a moment.";
+    return;
+  }
+  if (!res.ok) {
+    $("twitchState").textContent = data.error || "That didn't work.";
+    return;
+  }
+  if (!channel) $("twitchChannel").value = "";
+  showTwitch(data);
+}
+
+// -- test feed: the team's teamNN-preview, received over WHEP ----------------------------------------
+
+let viewer = null;       // {pc, resource, auth}
+let watching = false;
+let renewTimer = null;
+let viewRetry = null;
+let viewTimer = null;    // the countdown to stopping by itself
+let viewDeadline = 0;
+const VIEW_LIMIT_MS = 3 * 60000;
+
+async function watchPreview() {
+  const c = checkedLogin((text) => { $("previewState").textContent = text; });
+  if (!c) return;
+  watching = true;
+  $("watch").hidden = true;
+  $("unwatch").hidden = false;
+  viewDeadline = Date.now() + VIEW_LIMIT_MS;
+  clearInterval(viewTimer);
+  viewTimer = setInterval(() => {
+    const left = Math.max(0, viewDeadline - Date.now());
+    if (left === 0) {
+      stopWatching("Stopped after 3 minutes, to keep the server free for other players. Watch again if you need to.");
+      return;
+    }
+    $("viewLeft").textContent = `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}`;
+  }, 1000);
+  refreshMe();
+  await startViewer(c);
+}
+
+async function startViewer(c) {
+  clearTimeout(viewRetry);
+  closeViewer();
+  if (!watching) return;
+  const auth = basicAuth(c);
+  let path;
+  try {  // starts (or keeps running) the team's test feed
+    const res = await fetch("/go/preview", {method: "POST", headers: {"Authorization": auth}});
+    const data = await res.json();
+    if (!res.ok) {
+      stopWatching(data.error || "Couldn't start your test feed.");
+      return;
+    }
+    path = data.path;
+  } catch (e) {
+    return retryViewer(c, "Can't reach the stream server. Retrying...");
+  }
+  clearInterval(renewTimer);
+  renewTimer = setInterval(() => {  // the server stops the test feed a minute after the last of these
+    fetch("/go/preview", {method: "POST", headers: {"Authorization": auth}}).catch(() => {});
+  }, 30000);
+
+  const conn = new RTCPeerConnection({bundlePolicy: "max-bundle"});
+  viewer = {pc: conn, resource: null, auth};
+  const media = new MediaStream();
+  conn.addTransceiver("video", {direction: "recvonly"});
+  conn.addTransceiver("audio", {direction: "recvonly"});
+  conn.addEventListener("track", (e) => {
+    media.addTrack(e.track);
+    $("preview").srcObject = media;
+    $("preview").hidden = false;
+  });
+  conn.addEventListener("connectionstatechange", () => {
+    if (viewer && viewer.pc === conn && ["failed", "disconnected"].includes(conn.connectionState)) {
+      retryViewer(c, "The test feed dropped. Reconnecting...");
+    }
+  });
+  try {
+    await conn.setLocalDescription(await conn.createOffer());
+    await iceGatheringDone(conn);
+    const res = await fetch(new URL(`/${path}/whep`, location.origin), {
+      method: "POST",
+      headers: {"Content-Type": "application/sdp", "Authorization": auth},
+      body: conn.localDescription.sdp,
+    });
+    if (res.status === 401 || res.status === 403) {
+      stopWatching("Your login was refused for the test feed. Check it at the top.");
+      return;
+    }
+    if (!res.ok) return retryViewer(c, `The stream server answered ${res.status}. Retrying...`);
+    viewer.resource = new URL(res.headers.get("Location") || "", res.url).href;
+    await conn.setRemoteDescription({type: "answer", sdp: await res.text()});
+  } catch (e) {
+    return retryViewer(c, "Couldn't open the test feed. Retrying...");
+  }
+  const delay = $("test").querySelector(".delayMin").textContent;
+  $("previewState").innerHTML = `Watching your test feed (stops by itself in <b id="viewLeft">3:00</b>). Your game ` +
+    `shows up about ${delay} minute(s) after you went live; until then (or when nothing is coming in) you see the ` +
+    "waiting screen.";
+}
+
+function retryViewer(c, text) {
+  if (!watching) return;
+  $("previewState").textContent = text;
+  closeViewer();
+  clearTimeout(viewRetry);
+  viewRetry = setTimeout(() => startViewer(c), RETRY_MS);
+}
+
+function closeViewer() {
+  if (!viewer) return;
+  if (viewer.resource) {
+    fetch(viewer.resource, {method: "DELETE", headers: {"Authorization": viewer.auth}, keepalive: true}).catch(() => {});
+  }
+  viewer.pc.close();
+  viewer = null;
+}
+
+function stopWatching(text = "") {
+  if (watching) {  // nobody needs the test feed now: stop it on the server straight away
+    const c = credentials();
+    if (c.user && c.pass) {
+      fetch("/go/preview", {method: "DELETE", headers: {"Authorization": basicAuth(c)}, keepalive: true}).catch(() => {});
+    }
+  }
+  watching = false;
+  clearTimeout(viewRetry);
+  clearInterval(renewTimer);
+  clearInterval(viewTimer);
+  closeViewer();
+  $("preview").srcObject = null;
+  $("preview").hidden = true;
+  $("watch").hidden = false;
+  $("unwatch").hidden = true;
+  $("previewState").textContent = text;
 }
 
 function basicAuth(c) {
@@ -62,6 +333,7 @@ function setStatus(text, kind = "") {
   $("statusText").textContent = text;
   $("status").className = kind;
   if (kind !== "live") $("stats").textContent = "";
+  $("checkTest").hidden = kind !== "live" || watching;
 }
 
 function setNote(text) {
@@ -185,19 +457,13 @@ let retryTimer = null;
 let statsTimer = null;
 
 async function goLive() {
-  const c = credentials();
-  if (!c.user || !c.pass) {
-    setStatus("Enter your login and password first.", "bad");
-    return;
-  }
+  const c = checkedLogin((text) => setStatus(text, "bad"));
+  if (!c) return;
   const team = LOGIN_RE.exec(c.user);
-  if (!team) {
-    setStatus("That isn't a player login: they look like team05-p1.", "bad");
-    return;
-  }
   creds = c;
   whipUrl = new URL(`/${team[1]}/whip`, location.origin).href;
   try { sessionStorage.setItem(LOGIN_KEY, JSON.stringify(c)); } catch (e) { /* private mode */ }
+  refreshMe();
   mixer();
   $("go").disabled = true;
   try {
@@ -221,7 +487,7 @@ async function goLive() {
   updateSoundButton();
   wantLive = true;
   $("stop").hidden = false;
-  $("user").disabled = $("pass").disabled = $("pickObs").disabled = true;
+  $("user").disabled = $("pass").disabled = true;
   setStatus("Connecting...");
   await publish();
 }
@@ -375,7 +641,7 @@ function stop(text = "Not streaming.") {
   }
   updateSoundButton();
   $("go").disabled = false;
-  $("user").disabled = $("pass").disabled = $("pickObs").disabled = false;
+  $("user").disabled = $("pass").disabled = false;
   $("stop").hidden = true;
   if (text !== null) setStatus(text);
 }
@@ -448,12 +714,38 @@ function startStats() {
   }, 2000);
 }
 
+// -- the tournament delay (players streaming to Twitch must delay their own stream at least as much) --
+
+const FALLBACK_DELAY_MINUTES = 15;
+
+async function showDelay() {
+  let minutes = FALLBACK_DELAY_MINUTES;
+  try {
+    const res = await fetch("/go/delay", {cache: "no-store"});
+    const data = await res.json();
+    if (res.ok && Number(data.minutes) > 0) minutes = Number(data.minutes);
+  } catch (e) { /* keep the fallback */ }
+  const shown = Number.isInteger(minutes) ? `${minutes}` : minutes.toFixed(1).replace(/\.0$/, "");
+  document.querySelectorAll(".delayMin").forEach((el) => { el.textContent = shown; });
+  document.querySelectorAll(".delaySec").forEach((el) => { el.textContent = `${Math.ceil(minutes * 60)}`; });
+}
+
 // -- page wiring ----------------------------------------------------------------------------------
 
 initLogin();
+showLoggedIn(null);
 updateSoundButton();
 $("pickBrowser").addEventListener("click", () => choose("browser"));
 $("pickObs").addEventListener("click", () => choose("obs"));
+$("pickTwitch").addEventListener("click", () => choose("twitch"));
+$("alsoDirect").addEventListener("click", () => { choose("browser"); $("browser").scrollIntoView({behavior: "smooth"}); });
+$("twitchUse").addEventListener("click", () => setTwitch($("twitchChannel").value.trim()));
+$("twitchOff").addEventListener("click", () => setTwitch(null));
+$("watch").addEventListener("click", watchPreview);
+$("unwatch").addEventListener("click", () => stopWatching());
+$("loginForm").addEventListener("submit", logIn);
+$("loginChange").addEventListener("click", changeLogin);
+$("checkTest").addEventListener("click", () => { goToTest(); if (!watching) watchPreview(); $("checkTest").hidden = true; });
 $("go").addEventListener("click", goLive);
 $("stop").addEventListener("click", () => stop());
 $("sysOn").addEventListener("change", () => { updateGains(); updateSoundButton(); });
@@ -472,9 +764,11 @@ $("micDevice").addEventListener("change", () => openMic($("micDevice").value));
 window.addEventListener("beforeunload", (e) => {
   if (wantLive) e.preventDefault();  // "Leave site?": closing the tab stops the stream
 });
-window.addEventListener("pagehide", () => { if (wantLive) closeConnection(); });
+window.addEventListener("pagehide", () => { if (wantLive) closeConnection(); if (watching) stopWatching(); });
 if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
   $("go").disabled = true;
   setStatus("This browser can't share the screen. Use Chrome or Edge on a computer, or OBS.", "bad");
 }
 requestAnimationFrame(drawMeters);
+showDelay();
+setInterval(showDelay, 60000);  // the delay can change during the event

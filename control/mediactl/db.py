@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS delay_log (
     minutes REAL NOT NULL,
     at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS team_twitch (  -- Twitch passthrough: the team's feed shows this channel
+    path TEXT PRIMARY KEY,
+    channel TEXT NOT NULL,
+    set_by TEXT NOT NULL,           -- the player login that set it, or 'bot'
+    at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS previews (  -- a team's test feed runs until this time
+    path TEXT PRIMARY KEY,
+    until REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS matches (
     match_id TEXT PRIMARY KEY,
     manifest TEXT NOT NULL,
@@ -140,6 +150,49 @@ def record_refusal(conn, path: str, login: str, reason: str, at: float) -> None:
 
 def last_refusal(conn, path: str):
     return conn.execute("SELECT * FROM refusals WHERE path = ? ORDER BY at DESC LIMIT 1", (path,)).fetchone()
+
+
+# -- Twitch passthrough ------------------------------------------------------------
+
+def set_twitch(conn, path: str, channel: str | None, set_by: str, at: float) -> None:
+    """Use this Twitch channel for the team's feed, or stop (channel None)."""
+    if channel is None:
+        conn.execute("DELETE FROM team_twitch WHERE path = ?", (path,))
+    else:
+        conn.execute("INSERT INTO team_twitch (path, channel, set_by, at) VALUES (?, ?, ?, ?) "
+                     "ON CONFLICT(path) DO UPDATE SET channel = excluded.channel, set_by = excluded.set_by, "
+                     "at = excluded.at", (path, channel, set_by, at))
+
+
+def get_twitch(conn, path: str) -> str | None:
+    row = conn.execute("SELECT channel FROM team_twitch WHERE path = ?", (path,)).fetchone()
+    return row["channel"] if row else None
+
+
+def twitch_settings(conn) -> dict:
+    """team path -> {channel, set_by, at}"""
+    return {r["path"]: {"channel": r["channel"], "set_by": r["set_by"], "at": r["at"]}
+            for r in conn.execute("SELECT * FROM team_twitch")}
+
+
+# -- test feeds ------------------------------------------------------------------
+
+def request_preview(conn, path: str, until: float) -> None:
+    conn.execute("INSERT INTO previews (path, until) VALUES (?, ?) "
+                 "ON CONFLICT(path) DO UPDATE SET until = excluded.until", (path, until))
+
+
+def stop_preview(conn, path: str) -> None:
+    conn.execute("DELETE FROM previews WHERE path = ?", (path,))
+
+
+def active_previews(conn, at: float) -> list[str]:
+    return [r["path"] for r in conn.execute("SELECT path FROM previews WHERE until > ?", (at,))]
+
+
+def preview_active(conn, path: str, at: float) -> bool:
+    row = conn.execute("SELECT until FROM previews WHERE path = ?", (path,)).fetchone()
+    return row is not None and row["until"] > at
 
 
 # -- slots -----------------------------------------------------------------------

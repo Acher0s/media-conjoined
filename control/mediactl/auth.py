@@ -4,7 +4,8 @@
     already live, the attempt is refused and recorded so the bot's panel can explain it. The same
     login reconnecting (e.g. after a drop) is allowed and replaces its old connection.
   * casters may read only the delayed feeds.
-  * the internal delay players publish the delayed feeds.
+  * a team's players may read their own team's test feed (teamNN-preview), to check their setup.
+  * the internal delay players publish the delayed feeds and the test feeds.
 Anything else is refused.
 """
 import hmac
@@ -27,9 +28,10 @@ def decide(conn, live, payload: dict, now: float | None = None) -> bool:
     user = payload.get("user") or ""
     password = payload.get("password") or ""
     delayed = config.DELAYED_PATH_RE.match(path)
+    preview = config.PREVIEW_PATH_RE.match(path)
 
     if action == "publish":
-        if delayed:
+        if delayed or preview:
             return bool(config.DELAY_PASSWORD) and user == config.DELAY_USER and _same(password, config.DELAY_PASSWORD)
         if path not in config.TEAM_PATHS:
             return False
@@ -47,6 +49,10 @@ def decide(conn, live, payload: dict, now: float | None = None) -> bool:
         return True
 
     if action == "read":
+        if preview:
+            row = db.get_login(conn, user)
+            return bool(row and row["active"] and row["kind"] == "player" and row["team_path"] == preview.group(1)
+                        and _same(password, row["password"]))
         if not delayed:
             return False  # nobody reads live team paths from outside
         row = db.get_login(conn, user)
