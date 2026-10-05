@@ -6,6 +6,7 @@ the server writes). All times are UNIX timestamps in seconds (UTC).
 import json
 import secrets
 import sqlite3
+import string
 import time
 from pathlib import Path
 
@@ -70,8 +71,9 @@ def connect(path: Path, readonly: bool = False) -> sqlite3.Connection:
 
 
 def new_password() -> str:
-    # URL-safe characters only: passwords end up in SRT stream ids (':' separated) and links
-    return secrets.token_urlsafe(12)
+    # Letters and digits only: passwords end up in SRT stream ids (':' separated) and links, and in
+    # the export CSV, where a leading '-' would make spreadsheets read the cell as a formula
+    return "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
 
 
 # -- teams and logins ------------------------------------------------------------
