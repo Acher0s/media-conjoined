@@ -40,6 +40,14 @@
   .banner.tested { border-color: var(--good); background: #16281c; }
   .banner button { margin-top: 6px; }
   #test { border: 2px solid var(--accent); }
+  #settings { margin: 12px 0; padding: 12px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+  #settings.bad { border-color: var(--bad); }
+  #settings.good { border-color: var(--good); }
+  #settings h3 { margin: 0 0 6px; font-size: 16px; }
+  #settings ul { list-style: none; padding: 0; margin: 0; }
+  #settings li { margin: 4px 0; }
+  #settings .fix { color: var(--dim); font-size: 14px; margin-left: 26px; }
+  .banner .settingsWarning { color: var(--bad); font-weight: 600; }
   #checkTest { margin-top: 10px; }
   video { width: 100%; border-radius: 8px; background: #000; margin-top: 10px; }
   .choice { text-align: left; background: var(--card); color: var(--text); border: 2px solid var(--line); border-radius: 10px;
@@ -264,6 +272,7 @@
       <button class="small" id="watch">Watch my test feed</button>
       <button class="small" id="unwatch" hidden>Stop watching</button>
     </div>
+    <div id="settings" hidden></div>
     <video id="preview" controls autoplay playsinline muted hidden></video>
     <div id="previewState" class="hint"></div>
     <p class="hint">It stops by itself after 3 minutes, to keep the server free for other players: watch again if

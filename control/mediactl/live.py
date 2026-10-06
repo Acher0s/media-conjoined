@@ -71,6 +71,7 @@ class LiveState:
         self.updated_at: float | None = None
         self.teams: dict[str, dict] = {}  # team path -> live info (only while online)
         self.delayed: dict[str, dict] = {}  # delayed path -> {"publishing": bool, "readers": n}
+        self.settings: dict[str, dict] = {}  # team path -> stream settings checklist (settings.py)
         self._bytes: dict[str, tuple[float, int]] = {}
 
     def publisher_login(self, path: str) -> str | None:

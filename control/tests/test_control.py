@@ -71,6 +71,8 @@ def test_export_links(conn):
 class FakeLive:
     def __init__(self, publishers=None):
         self.publishers = publishers or {}
+        self.teams = {path: {"login": login} for path, login in self.publishers.items()}
+        self.settings = {}
 
     def publisher_login(self, path):
         return self.publishers.get(path)
@@ -196,7 +198,7 @@ def test_go_live_page_served_for_team_paths_only(conn):
     from mediactl import pages
 
     async def check():
-        async with TestClient(TestServer(pages.make_app(conn))) as client:
+        async with TestClient(TestServer(pages.make_app(conn, FakeLive()))) as client:
             for url in ("/go/", "/go/team05"):
                 r = await client.get(url)
                 assert r.status == 200 and "text/html" in r.headers["Content-Type"]
@@ -250,7 +252,7 @@ def test_go_live_endpoints_for_players(conn):
     auth_header = {"Authorization": "Basic " + base64.b64encode(f"Team05-P1:{pw}".encode()).decode()}
 
     async def check():
-        async with TestClient(TestServer(pages.make_app(conn))) as client:
+        async with TestClient(TestServer(pages.make_app(conn, FakeLive()))) as client:
             assert (await client.get("/go/me")).status == 401
             bad = {"Authorization": "Basic " + base64.b64encode(b"team05-p1:nope").decode()}
             assert (await client.get("/go/me", headers=bad)).status == 401
@@ -288,3 +290,23 @@ def test_go_live_endpoints_for_players(conn):
             assert (await client.post("/go/preview", headers=auth_header)).status == 200
 
     asyncio.run(check())
+
+
+# -- stream settings checks ---------------------------------------------------------
+
+def test_settings_checklist():
+    from mediactl import settings
+    good = {"video": {"codec": "h264", "width": 1920, "height": 1080, "fps": 60}, "bitrate_kbps": 6000,
+            "audio": {"codec": "aac"}}
+    items = settings.check(good, {"b_frames": False, "keyframe_gap": 2.0, "keyframe_gap_at_least": False})
+    assert all(item["ok"] for item in items) and len(items) == 7
+
+    # OBS defaults gone wrong: B-frames, auto keyframes (one keyframe in an 8 s segment), 10 Mbps, 1440p, no sound
+    bad = {"video": {"codec": "h264", "width": 2560, "height": 1440, "fps": 60}, "bitrate_kbps": 10000}
+    items = {i["key"]: i for i in settings.check(bad, {"b_frames": True, "keyframe_gap": 8.3,
+                                                       "keyframe_gap_at_least": True})}
+    assert [k for k, i in items.items() if not i["ok"]] == ["bframes", "keyframes", "bitrate", "resolution", "audio"]
+    assert items["keyframes"]["value"] == "at least 8.3 s" and items["bitrate"]["value"] == "10.0 Mbps"
+    assert all(key in settings.FIXES for key in items)
+    hevc = settings.check({"video": {"codec": "hevc"}}, {})
+    assert hevc[0] == {"key": "codec", "ok": False, "value": "HEVC"}

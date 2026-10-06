@@ -1,12 +1,12 @@
 """Runs the bot API (CONTROL_API_PORT), MediaMTX's auth hook (CONTROL_AUTH_PORT) and the players'
-go-live page (CONTROL_PAGES_PORT), and polls MediaMTX."""
+go-live page (CONTROL_PAGES_PORT), polls MediaMTX, and checks the live streams' settings."""
 import asyncio
 import logging
 
 import aiohttp
 from aiohttp import web
 
-from . import api, auth, config, db, pages
+from . import api, auth, config, db, pages, probe, settings
 from .live import LiveState, MediaMTX
 
 log = logging.getLogger("mediactl")
@@ -37,7 +37,7 @@ async def main() -> None:
         live = LiveState(conn, MediaMTX(session))
         runners = []
         apps = ((api.make_app(conn, live), config.API_PORT), (make_auth_app(conn, live), config.AUTH_PORT),
-                (pages.make_app(conn), config.PAGES_PORT))
+                (pages.make_app(conn, live), config.PAGES_PORT))
         for app, port in apps:
             runner = web.AppRunner(app, access_log=None)
             await runner.setup()
@@ -45,9 +45,11 @@ async def main() -> None:
             runners.append(runner)
         log.info("Bot API on :%d, MediaMTX auth hook on :%d, go-live pages on :%d",
                  config.API_PORT, config.AUTH_PORT, config.PAGES_PORT)
+        checker = asyncio.create_task(settings.watch(live, probe.ProbeCache()))
         try:
             await live.run()
         finally:
+            checker.cancel()
             for runner in runners:
                 await runner.cleanup()
 

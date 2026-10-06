@@ -120,6 +120,8 @@ def make_app(conn, live) -> web.Application:
                                          "name": row["name"] if row else None}
             if path in passthrough:
                 entry["twitch"] = passthrough[path]
+            if path in live.settings:
+                entry["settings"] = live.settings[path]
             teams.append(entry)
         minutes, _ = _delay(conn)
         now = time.time()
@@ -142,6 +144,8 @@ def make_app(conn, live) -> web.Application:
         result = {"path": path, "name": db.team_names(conn).get(path), "live": info is not None}
         if path in (passthrough := twitch.status(conn)):
             result["twitch"] = passthrough[path]
+        if path in live.settings:
+            result["settings"] = live.settings[path]
         if info:
             row = db.get_login(conn, info.get("login") or "")
             result.update(login=info.get("login"), player_name=row["name"] if row else None,

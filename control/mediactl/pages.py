@@ -6,7 +6,8 @@ or needs a login to load: the player's login comes from the link's #fragment, wh
 send to a server, or is typed in, and MediaMTX checks it with the auth hook like any publish.
 /go/delay tells the page the current delay, which players streaming to Twitch must match, and
 /go/twitch lets a player (with their login, as HTTP Basic auth) turn Twitch passthrough on or off
-for their team, /go/me tells them what the tournament knows about them (team, tested or not, Twitch)
+for their team, /go/me tells them what the tournament knows about them (team, tested or not, Twitch,
+whether their team is live and its stream settings checklist from settings.py)
 and /go/preview starts (POST, again every 30 s while watching) or stops (DELETE) their team's test
 feed (teamNN-preview); at most PREVIEW_MAX run at once.
 """
@@ -19,7 +20,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import config, db, twitch
+from . import config, db, settings, twitch
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,14 @@ def _twitch_state(conn, path: str) -> dict:
     return {"team": path, "channel": setting.get("channel"), "live": setting.get("live")}
 
 
-def make_app(conn) -> web.Application:
+def _settings_with_fixes(result: dict | None) -> dict | None:
+    if not result:
+        return None
+    return {**result, "checks": [{**item, "fix": None if item["ok"] else settings.FIXES.get(item["key"])}
+                                 for item in result["checks"]]}
+
+
+def make_app(conn, live) -> web.Application:
     async def publish_page(request: web.Request) -> web.StreamResponse:
         path = request.match_info.get("path")
         if path is not None and path not in config.TEAM_PATHS:
@@ -102,6 +110,8 @@ def make_app(conn) -> web.Application:
                                   "tested": row["verified_at"] is not None, "tested_at": row["verified_at"],
                                   "team_tested": team_tested,
                                   "twitch": _twitch_state(conn, row["team_path"]),
+                                  "live_login": (live.teams.get(row["team_path"]) or {}).get("login"),
+                                  "settings": _settings_with_fixes(live.settings.get(row["team_path"])),
                                   "delay_minutes": db.get_delay(conn, config.DEFAULT_DELAY_MINUTES)[0]},
                                  headers={"Cache-Control": "no-store"})
 

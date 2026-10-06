@@ -87,11 +87,13 @@ function goToTest() {
 
 let meTimer = null;
 let loggedIn = false;
+let teamLive = false;  // check more often while the team streams: settings change as players fix them
 
 function showLoggedIn(data) {
   loggedIn = Boolean(data);
   $("loginForm").hidden = loggedIn;
   $("loginDone").hidden = !loggedIn;
+  if (!data) showSettings(null);
   if (data) {
     $("whoLogin").textContent = data.login;
     $("whoMore").textContent = `(${data.name} \u00b7 ${data.team_name || data.team})`;
@@ -104,6 +106,40 @@ function escapeHtml(text) {
   const el = document.createElement("span");
   el.textContent = text;
   return el.innerHTML;
+}
+
+// -- the stream settings checklist (settings.py on the server) ----------------------------------------
+
+const SETTING_LABELS = {
+  codec: "Video codec H.264",
+  bframes: "No B-frames",
+  keyframes: "A keyframe every 2 s",
+  bitrate: "Bitrate 8 Mbps or less",
+  resolution: "1080p or lower",
+  fps: "60 fps or less",
+  audio: "Sound",
+};
+
+function showSettings(data) {
+  const box = $("settings");
+  const result = data && data.settings;
+  if (!result) {
+    box.hidden = true;
+    return;
+  }
+  const ago = Math.max(0, Math.round(Date.now() / 1000 - result.checked_at));
+  const whose = result.login && result.login !== data.login ? ` (${escapeHtml(result.login)}'s stream)` : "";
+  const live = data.live_login ? `checked ${ago < 60 ? `${ago} s` : `${Math.round(ago / 60)} min`} ago`
+                               : "from your team's last stream";
+  const items = result.checks.map((item) =>
+    `<li>${item.ok ? "\u2705" : "\u274c"} ${SETTING_LABELS[item.key] || item.key} ` +
+    `<span class="hint">(${escapeHtml(String(item.value))})</span>` +
+    (item.fix ? `<div class="fix">Fix: ${escapeHtml(item.fix)}</div>` : "") + "</li>").join("");
+  box.className = result.ok ? "good" : "bad";
+  box.innerHTML = `<h3>${result.ok ? "\u2705 Your stream settings are good" : "\u274c Your stream settings need fixing"}</h3>` +
+    `<p class="hint">Measured on your stream${whose}, ${live}.${result.ok ? "" : " Change them, then check back here " +
+    "(it updates by itself)."}</p><ul>${items}</ul>`;
+  box.hidden = false;
 }
 
 function showBanner(data) {
@@ -134,13 +170,17 @@ function showBanner(data) {
       "<ol><li>Go live, the way you chose below.</li><li>Watch your test feed and check that you see and hear your " +
       "game.</li><li>This banner turns green by itself.</li></ol>" + button("Go to the test \u2193");
   }
+  if (data && data.settings && !data.settings.ok) {
+    banner.insertAdjacentHTML("beforeend", "<p class=\"settingsWarning\">\u274c Your stream settings need fixing: " +
+                              "see the checklist in Test your setup.</p>");
+  }
   const go = banner.querySelector("[data-go-test]");
   if (go) go.addEventListener("click", goToTest);
 }
 
 async function refreshMe() {
   clearTimeout(meTimer);
-  meTimer = setTimeout(refreshMe, watching ? 10000 : 30000);
+  meTimer = setTimeout(refreshMe, watching || teamLive ? 10000 : 30000);
   const c = credentials();
   if (!c.user || !c.pass || !LOGIN_RE.test(c.user)) {
     showLoggedIn(null);
@@ -159,8 +199,10 @@ async function refreshMe() {
     return;
   }
   try { sessionStorage.setItem(LOGIN_KEY, JSON.stringify(c)); } catch (e) { /* private mode */ }
+  teamLive = Boolean(data.live_login);
   showLoggedIn(data);
   showTwitch(data.twitch);
+  showSettings(data);
 }
 
 function logIn(e) {
