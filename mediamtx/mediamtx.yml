@@ -58,100 +58,100 @@ paths:
   # path, hence one entry per slot.)
   s1t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s1t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s2t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s2t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s3t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s3t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s4t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s4t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s5t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s5t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s6t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s6t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s7t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s7t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s8t1-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   s8t2-delayed:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
 
   # Test feeds, one per team: the team's own players watch what a delayed feed would show for them
   # (go-live page, "Test your setup"). Published by the delay service while the page asks for it.
   team01-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team02-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team03-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team04-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team05-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team06-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team07-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team08-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team09-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team10-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team11-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team12-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team13-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team14-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team15-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4
   team16-preview:
     alwaysAvailable: yes
-    alwaysAvailableFile: /slate/slate.mp4
+    alwaysAvailableFile: /conf/slate.mp4

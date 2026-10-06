@@ -16,14 +16,16 @@ services:
   mediamtx:
     image: bluenviron/mediamtx:1.21.1-ffmpeg
     restart: unless-stopped
+    # The whole mediamtx/ folder, not single files: a git pull replaces files, and a container keeps
+    # seeing the old file through a single-file mount. MediaMTX reloads its config when it changes.
+    command: ["/conf/mediamtx.yml"]
     environment:
       TZ: UTC  # recording file names are read as UTC
       MTX_WEBRTCADDITIONALHOSTS: ${PUBLIC_IP:-}
       MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE: ${SRT_PASSPHRASE:-}
       MTX_PATHDEFAULTS_SRTREADPASSPHRASE: ${SRT_PASSPHRASE:-}
     volumes:
-      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
-      - ./mediamtx/slate.mp4:/slate/slate.mp4:ro
+      - ./mediamtx:/conf:ro
       - ${HOST_RECORDINGS_DIR:-./recordings}:/recordings
     ports:
       - "8890:8890/udp"  # SRT (players' OBS, casters' OBS)
