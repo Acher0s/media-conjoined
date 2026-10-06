@@ -310,3 +310,24 @@ def test_settings_checklist():
     assert all(key in settings.FIXES for key in items)
     hevc = settings.check({"video": {"codec": "hevc"}}, {})
     assert hevc[0] == {"key": "codec", "ok": False, "value": "HEVC"}
+
+
+def test_refusals_are_logged_with_a_reason_once_a_minute(conn, caplog):
+    import logging
+    roster.sync(conn, [team("team05", "A", ("1", "alice"))], [{"discord_id": "9", "name": "anna"}])
+    read = {"action": "read", "user": "caster-01", "password": "wrong", "path": "s1t2-delayed",
+            "protocol": "srt", "ip": "203.0.113.7"}
+    with caplog.at_level(logging.INFO, logger="mediactl.auth"):
+        for n in range(3):  # OBS retrying every 2 s
+            assert not auth.decide(conn, FakeLive(), read, now=1000 + 2 * n)
+        assert not auth.decide(conn, FakeLive(), {**read, "user": ""}, now=1001)  # no login: debug only
+        assert not auth.decide(conn, FakeLive(), read, now=1070)
+    lines = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert len(lines) == 2 and "wrong" not in lines[0].split("Refused")[0]
+    assert lines[0] == ("Refused caster-01 read s1t2-delayed: wrong password (reset or re-exported since?) "
+                        "[srt from 203.0.113.7]")
+    assert lines[1].endswith("(and 2 more time(s) since the last report)")
+    assert auth._reason(conn, FakeLive(), "read", "team05", "caster-01", "x", {}, 0) == "live team paths can't be read"
+    pw = db.get_login(conn, "team05-p1")["password"]
+    assert auth._reason(conn, FakeLive(), "publish", "team06", "team05-p1", pw, {}, 0) == \
+        "this login belongs to team05"
