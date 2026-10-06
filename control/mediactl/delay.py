@@ -4,14 +4,19 @@ Feed time = now - delay. A slot shows the team assigned to it at feed time (slot
 DB). Because the feeds run behind live, everything a slot will play is already on disk, so a
 player plays the recorded segments back at real-time speed:
 
-  ffmpeg (concat the segments, no pacing) -> MPEG-TS pipe -> ffmpeg (-re, video copy,
+  ffmpeg per run (concat the segments, no pacing) -> buffer -> ffmpeg (-re, video copy,
   audio to Opus) -> RTSP -> MediaMTX
 
 (Pacing the concat input directly makes ffmpeg fall behind real time at every file boundary, so
-the work is split over two processes.) Each "run" covers continuous footage of one team: it ends
-at a gap in the recordings, at the next slot assignment, or at the newest complete segment, and
-the next run starts right where it left off. MediaMTX keeps casters connected between runs and
-shows the slate whenever nothing is published (alwaysAvailable in mediamtx.yml).
+the work is split over two processes.) A "run" is the footage of one team that's on disk and
+complete; while it plays, more gets recorded, so the next run follows. One publisher plays run
+after run for as long as the footage continues: each run's reader starts while the previous one is
+still playing (a bounded buffer, BUFFER_BYTES, keeps it ahead) and its timestamps continue where
+the previous one's ended, so the switch is seamless. Restarting the publisher per run made the
+feed stall briefly at every switch. The publisher only stops at a real break: a gap in the
+recordings, the next slot assignment, Twitch passthrough, or a delay change. MediaMTX keeps casters
+connected meanwhile and shows the slate whenever nothing is published (alwaysAvailable in
+mediamtx.yml).
 
 Twitch passthrough: when the team on the slot at feed time has a Twitch channel set (twitch.py),
 the player relays that channel live instead (streamlink -> ffmpeg, audio to Opus), because the
@@ -50,6 +55,9 @@ SETTLE_SECONDS = 3.0
 TWITCH_RETRY_SECONDS = 15.0
 # Start this many Twitch segments (about 2 s each) behind live: a cushion against late segments
 TWITCH_LIVE_EDGE = 5
+# How far the next run's reader may get ahead of the publisher (~10 s of a 6 Mbps stream)
+BUFFER_BYTES = 8 * 1024 * 1024
+READ_CHUNK = 64 * 1024
 
 
 # Re-encoding for the test feeds: plays in any browser, cheap enough for several at a time
@@ -67,6 +75,7 @@ class SlotPlayer:
         self.probes = probes
         self.status = status
         self.position: float | None = None  # content time the feed has played up to
+        self._fed_until: float | None = None  # content time read into the current publisher so far
         self._procs: list[asyncio.subprocess.Process] = []
 
     def _set_status(self, state: str, **extra) -> None:
@@ -156,41 +165,20 @@ class SlotPlayer:
 
     async def _play(self, team: str, run: list[recordings.Segment], inpoint: float, has_audio: bool,
                     delay: float) -> None:
-        content_start = run[0].start + inpoint
-        content_end = run[-1].end
-        with tempfile.NamedTemporaryFile("w", suffix=".ffconcat", delete=False) as f:
-            f.write(recordings.concat_list(run, content_start))
-            listfile = f.name
-
-        url = self._publish_url()
-        reader_cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
-                      "-f", "concat", "-safe", "0", "-i", listfile,
-                      "-map", "0:v:0"] + (["-map", "0:a:0"] if has_audio else []) + \
-                     ["-c", "copy", "-f", "mpegts", "pipe:1"]
-        publisher_cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
-                         "-re", "-f", "mpegts", "-i", "pipe:0"]
-        if has_audio:
-            publisher_cmd += ["-map", "0:v:0", "-map", "0:a:0"]
-        else:  # MediaMTX expects H264 + Opus on the delayed feeds: add silence
-            publisher_cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "0:v:0", "-map", "1:a:0",
-                              "-shortest"]
-        publisher_cmd += [*self.video_codec, "-c:a", "libopus", "-b:a", "96k", "-ar", "48000", "-ac", "2",
-                          "-f", "rtsp", "-rtsp_transport", "tcp", url]
-
-        read_fd, write_fd = os.pipe()
-        try:
-            reader = await asyncio.create_subprocess_exec(*reader_cmd, stdout=write_fd)
-            publisher = await asyncio.create_subprocess_exec(*publisher_cmd, stdin=read_fd)
-        finally:
-            os.close(read_fd)
-            os.close(write_fd)
-        self._procs = [reader, publisher]
+        """Play the team's footage from `run` on, run after run, through one publisher (see the module
+        docstring), until the footage stops continuing or the delay changes."""
+        session_start = run[0].start + inpoint
+        publisher = await asyncio.create_subprocess_exec(*self._publisher_cmd(has_audio), stdin=asyncio.subprocess.PIPE)
+        self._procs = [publisher]
+        self._fed_until = session_start
+        buffer: asyncio.Queue = asyncio.Queue(maxsize=BUFFER_BYTES // READ_CHUNK)
+        feeder = asyncio.create_task(self._feed(team, run, session_start, has_audio, buffer))
+        writer = asyncio.create_task(self._write(buffer, publisher))
         wall_start = time.time()
-        log.info("[%s] playing %s from %s (%d segment(s), %.0fs)", self.slot, team,
-                 time.strftime("%H:%M:%S", time.gmtime(content_start)), len(run), content_end - content_start)
+        log.info("[%s] playing %s from %s", self.slot, team, time.strftime("%H:%M:%S", time.gmtime(session_start)))
         try:
             while publisher.returncode is None:
-                self.position = content_start + (time.time() - wall_start)
+                self.position = session_start + (time.time() - wall_start)
                 self._set_status("playing", team=team, content_time=self.position,
                                  behind_seconds=round(time.time() - self.position, 1))
                 if abs(self._delay() - delay) > 0.5:
@@ -202,13 +190,100 @@ class SlotPlayer:
                     pass
             else:
                 if publisher.returncode == 0:
-                    self.position = content_end  # played the whole run: continue right after it
+                    self.position = self._fed_until  # played everything: continue right after it
                 else:
                     log.warning("[%s] publisher exited with %s", self.slot, publisher.returncode)
                     await asyncio.sleep(1)
         finally:
+            for task in (feeder, writer):
+                task.cancel()
+            await asyncio.gather(feeder, writer, return_exceptions=True)
             await self._stop()
+
+    def _publisher_cmd(self, has_audio: bool) -> list[str]:
+        cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-re", "-f", "mpegts", "-i", "pipe:0"]
+        if has_audio:
+            cmd += ["-map", "0:v:0", "-map", "0:a:0"]
+        else:  # MediaMTX expects H264 + Opus on the delayed feeds: add silence
+            cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        return cmd + [*self.video_codec, "-c:a", "libopus", "-b:a", "96k", "-ar", "48000", "-ac", "2",
+                      "-f", "rtsp", "-rtsp_transport", "tcp", self._publish_url()]
+
+    async def _feed(self, team: str, run: list[recordings.Segment], session_start: float, has_audio: bool,
+                    buffer: asyncio.Queue) -> None:
+        """Read run after run into the buffer, until the footage stops continuing."""
+        start = session_start
+        try:
+            while run:
+                await self._read_run(team, run, start, start - session_start, has_audio, buffer)
+                self._fed_until = run[-1].end
+                waited = 0.0
+                while (following := self._next_run(team, run)) == [] and (not buffer.empty() or waited < 3):
+                    await asyncio.sleep(0.5)  # recorded but not complete yet: it will be
+                    waited += 0.5
+                run = following
+                start = run[0].start if run else 0.0
+        finally:
+            try:
+                buffer.put_nowait(None)  # end of the stream: the publisher plays what's left, then exits
+            except asyncio.QueueFull:
+                pass
+
+    def _next_run(self, team: str, previous: list[recordings.Segment]) -> list[recordings.Segment] | None:
+        """The run right after `previous`; [] if it isn't complete yet, None if the footage doesn't continue
+        (a gap, the slot's next team, Twitch passthrough)."""
+        end = previous[-1].end
+        if self._team_at(end) != team or db.get_twitch(self.conn, team) is not None:
+            return None
+        segs = recordings.segments(config.RECORDINGS_DIR / team)
+        i = next((k for k, seg in enumerate(segs) if seg.start > previous[-1].start), None)
+        if i is None:
+            return []  # the next segment isn't even started yet
+        if segs[i].start - end > recordings.GAP_TOLERANCE:
+            return None
+        return recordings.contiguous_from(segs, i, stop_at=self._next_change(end),
+                                          complete_before=time.time() - SETTLE_SECONDS)
+
+    async def _read_run(self, team: str, run: list[recordings.Segment], start: float, offset: float,
+                        has_audio: bool, buffer: asyncio.Queue) -> None:
+        """One run of segments as MPEG-TS into the buffer, its timestamps shifted to follow the previous runs."""
+        with tempfile.NamedTemporaryFile("w", suffix=".ffconcat", delete=False) as f:
+            f.write(recordings.concat_list(run, start))
+            listfile = f.name
+        cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listfile,
+               "-map", "0:v:0", *(["-map", "0:a:0"] if has_audio else []), "-c", "copy",
+               "-output_ts_offset", f"{offset:.6f}", "-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", "pipe:1"]
+        reader = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE)
+        log.debug("[%s] reading %s from %s (%d segment(s), %.0fs)", self.slot, team,
+                  time.strftime("%H:%M:%S", time.gmtime(start)), len(run), run[-1].end - start)
+        try:
+            while chunk := await reader.stdout.read(READ_CHUNK):
+                await buffer.put(chunk)
+            await reader.wait()
+        finally:
+            if reader.returncode is None:
+                reader.kill()
+            # communicate() reads the pipe to its end: wait() alone also waits for the pipe to close,
+            # which a full pipe nobody reads never does (the player would hang here)
+            try:
+                await asyncio.wait_for(reader.communicate(), 5)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                pass
             Path(listfile).unlink(missing_ok=True)
+
+    @staticmethod
+    async def _write(buffer: asyncio.Queue, publisher: asyncio.subprocess.Process) -> None:
+        try:
+            while (chunk := await buffer.get()) is not None:
+                publisher.stdin.write(chunk)
+                await publisher.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            try:
+                publisher.stdin.close()
+            except (BrokenPipeError, ConnectionResetError, RuntimeError):
+                pass
 
     def _publish_url(self) -> str:
         url = f"{config.MEDIAMTX_RTSP}/{self.output}"
